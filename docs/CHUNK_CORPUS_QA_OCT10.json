@@ -1,0 +1,10 @@
+{
+  "parent_chunks": 556,
+  "child_chunks": 782,
+  "split_parents": 136,
+  "max_tokens": 399,
+  "target_pmids": 20,
+  "parent_manifest_sha256": "3d22b30de32f2fb569b2af2080206e2f8cb0c6be3a33e763596c1db0dd2578a2",
+  "child_corpus_sha256": "0f63a7389ce5243154a4717f66837ce8eee6d21d39b1678e81cdd23928ead2b0",
+  "issues": []
+}
