@@ -7,3 +7,15 @@ __pycache__/
 runs/
 data/
 indexes/
+
+# Local model deployment dependencies, downloads, and machine-specific helpers
+.qwen-deploy-tools/
+llama-master.tar.gz
+llama-ui-dist.tar.gz
+qwen38-local-download.log
+qwen38-download-parts/
+*.gguf
+qwen-download-probe.bin
+download_qwen38.py
+upload_qwen38.py
+verify_local_qwen38.py

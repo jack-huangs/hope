@@ -3,10 +3,18 @@ from pathlib import Path
 
 import pytest
 
-from evidence_mdt.cli import main
+from evidence_mdt.cli import args_parser, main
 from evidence_mdt.data import local_text_corpus, normalize_question
 from evidence_mdt.schema import Evidence, Question
 from evidence_mdt.data import write_jsonl
+
+
+def test_run_repeats_default_is_one():
+    args = args_parser().parse_args([
+        "run", "--questions", "questions.jsonl", "--corpus", "corpus.jsonl",
+        "--output", "run", "--model-backend", "mock", "--retrieval-backend", "mock",
+    ])
+    assert args.repeats == 1
 
 
 def test_same_named_local_documents_have_distinct_chunk_ids(tmp_path):

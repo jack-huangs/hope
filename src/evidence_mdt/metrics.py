@@ -9,6 +9,8 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
+from .schema import probability_sum_within_tolerance
+
 
 def _valid_probabilities(row: dict[str, Any], require_options: bool = True) -> bool:
     probs = row.get("probabilities")
@@ -23,7 +25,7 @@ def _valid_probabilities(row: dict[str, Any], require_options: bool = True) -> b
     if any(not isinstance(p, (float, int)) or isinstance(p, bool)
            or not math.isfinite(p) or not 0 <= p <= 1 for p in probs.values()):
         return False
-    return abs(sum(probs.values()) - 1) <= 0.01
+    return probability_sum_within_tolerance(probs.values())
 
 
 def brier(probabilities: dict[str, float], gold: str) -> float:

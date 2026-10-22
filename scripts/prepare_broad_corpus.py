@@ -32,7 +32,7 @@ def public_model_config(model, backend: str) -> dict:
 def model_payload(question: dict) -> dict:
     # 只传题干；PubMedQA CONTEXTS 可能包含研究结果，绝不能进入宽查询生成。
     return {"task": "queries", "question": {"question_id": question["question_id"],
-              "dataset": question["dataset"], "stem": question["stem"]},
+              "dataset": question["dataset"], "stem": question["stem"].split("\nAnswer Choices:", 1)[0]},
             "purpose": "Broad PubMed abstract recall when two frozen narrow queries yielded fewer than 3 unique abstracts",
             "constraints": ("Return exactly two short PubMed Boolean queries. Each query should use only 2-3 core medical "
                             "concepts, combining synonyms with OR and concepts with AND. Do not require all case "
@@ -88,7 +88,9 @@ def totals(manifest: dict) -> tuple[int, int]:
 
 def prepare(source: Path, output: Path, max_records: int = 8, max_model_calls: int = 20,
             max_tokens: int = 30000, backend: str = "deepseek", retries: int = 2,
-            pause: float = 1.0, backoff: float = 1.0) -> dict:
+            pause: float = 1.0, backoff: float = 1.0, reuse_source: Path | None = None,
+            query_protocol: str = "stem-only-2-to-3-core-concepts-v1",
+            format_repair_sha256: str | None = None) -> dict:
     if max_records < 1 or max_model_calls < 0 or max_tokens < 0 or retries < 0 or pause < 0:
         raise ValueError("Invalid limits")
     source, output = source.resolve(), output.resolve()
@@ -105,8 +107,13 @@ def prepare(source: Path, output: Path, max_records: int = 8, max_model_calls: i
               "models_code_sha256": base.sha((ROOT / "src/evidence_mdt/models.py").read_bytes()),
               "model": public_model_config(model, backend), "max_records": max_records,
               "sort": "relevance", "trigger": "per-question unique source abstracts < 3",
-              "query_protocol": "stem-only-2-to-3-core-concepts-v1", "retries": retries}
+              "query_protocol": query_protocol, "retries": retries}
+    if format_repair_sha256:
+        config["format_repair_sha256"] = format_repair_sha256
     fingerprint = base.sha(base.canonical(config))
+    if reuse_source:
+        config["reuse_manifest_sha256"] = base.sha((reuse_source / "preparation_manifest.json").read_bytes())
+        fingerprint = base.sha(base.canonical(config))
     manifest_path = output / "preparation_manifest.json"
     if output.exists() and not manifest_path.exists() and any(output.iterdir()):
         raise FileExistsError("Output has files but no broad-query manifest")
@@ -133,6 +140,9 @@ def prepare(source: Path, output: Path, max_records: int = 8, max_model_calls: i
                     "new_model_calls": 0, "known_tokens": 0, "question_ids": parent["question_ids"],
                     "selected_questions": selected, "forbidden_pubmedqa_pmids": parent["forbidden_pubmedqa_pmids"],
                     "records": records}
+        if reuse_source:
+            from reuse_query_snapshot import reuse_rows
+            reuse_rows(output, manifest, reuse_source, broad=True)
         base.save_json(manifest_path, manifest)
     forbidden = set(manifest["forbidden_pubmedqa_pmids"])
     base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
@@ -238,7 +248,11 @@ def prepare(source: Path, output: Path, max_records: int = 8, max_model_calls: i
                     sources[cid].append(origin)
     base.write_jsonl(output / "corpus.jsonl", list(by_chunk.values()))
     calls, tokens = totals(manifest)
+    reused = [c for r in manifest["records"] if r.get("reused_from") for c in r["model_calls"]]
     manifest.update({"new_model_calls": calls, "known_tokens": tokens,
+                     "actual_new_model_calls": calls - len(reused),
+                     "reused_model_calls": len(reused),
+                     "reused_known_tokens": sum(int((c.get("usage") or {}).get("total_tokens") or 0) for c in reused),
                      "corpus_chunks": len(by_chunk), "corpus_sha256": base.sha((output / "corpus.jsonl").read_bytes()),
                      "chunk_sources": sources,
                      "status": "budget_stopped" if budget_stopped else

@@ -50,7 +50,7 @@ def args_parser() -> argparse.ArgumentParser:
     run.add_argument("--index-manifest", type=Path)
     run.add_argument("--query-manifest", type=Path,
                      help="每题固定的短检索查询；按公开题面哈希校验")
-    run.add_argument("--repeats", type=int, default=2)
+    run.add_argument("--repeats", type=int, default=1)
     run.add_argument("--max-calls", type=int, default=50000)
     run.add_argument("--max-tokens", type=int, default=10000000)
     run.add_argument("--interventions", choices=["none", "b", "c", "both"], default="none")

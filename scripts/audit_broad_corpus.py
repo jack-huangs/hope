@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -18,6 +19,8 @@ def audit(folder: Path) -> dict:
     folder = folder.resolve()
     manifest_raw = (folder / "preparation_manifest.json").read_bytes()
     manifest = json.loads(manifest_raw)
+    failure_hash_path = folder / "failed_response_hashes.json"
+    failure_hashes = json.loads(failure_hash_path.read_bytes()) if failure_hash_path.exists() else {}
     source = Path(manifest["source_snapshot"])
     source_raw = (source / "preparation_manifest.json").read_bytes()
     parent = json.loads(source_raw)
@@ -59,18 +62,46 @@ def audit(folder: Path) -> dict:
             if row["status"] != "not_triggered" or row["model_calls"] or row["snapshots"]:
                 issues.append(f"{label}: unselected question was processed")
             continue
-        if row["status"] != "ready" or len(row["model_calls"]) != 1 or len(row["queries"]) != 2:
-            issues.append(f"{label}: selected question not ready with exactly one model call and two queries")
+        if row["status"] != "ready" or not 1 <= len(row["model_calls"]) <= 3 or len(row["queries"]) != 2:
+            issues.append(f"{label}: selected question not ready with bounded calls and two queries")
             continue
-        call = row["model_calls"][0]
-        payload = call["request"]
-        visible = payload["question"]
-        if set(visible) != {"question_id", "dataset", "stem"} or visible != {k: q[k] for k in visible}:
-            issues.append(f"{label}: model request includes non-stem question data")
-        wire = call.get("wire_request") or {}
-        users = [x["content"] for x in wire.get("messages", []) if x.get("role") == "user"]
-        if users and (len(users) != 1 or json.loads(users[0]) != payload):
-            issues.append(f"{label}: wire request differs from saved payload")
+        if len(row["model_calls"]) == 3 and row["model_calls"][-1].get("call_kind") != "query_format_repair":
+            issues.append(f"{label}: third call is not an explicit format repair")
+        expected_visible = {"question_id": q["question_id"], "dataset": q["dataset"],
+                            "stem": q["stem"].split("\nAnswer Choices:", 1)[0]}
+        for attempt_index, attempt in enumerate(row["model_calls"]):
+            payload = attempt["request"]
+            if attempt.get("call_kind") == "query_format_repair":
+                expected_keys = {"task", "protocol", "question_id", "input_queries", "constraints"}
+                if set(payload) != expected_keys or payload.get("question_id") != label or attempt_index != 2:
+                    issues.append(f"{label}/{attempt_index}: invalid format-only repair payload")
+                previous = json.loads(row["model_calls"][attempt_index - 1]["raw_response"]["choices"][0]["message"]["content"])["queries"]
+                if payload.get("input_queries") != previous:
+                    issues.append(f"{label}: repair input differs from last invalid response")
+                from repair_broad_query_format_oct12 import validate_repair
+                try:
+                    validate_repair(previous, row["queries"])
+                except ValueError:
+                    issues.append(f"{label}: repair changed original query words")
+            else:
+                visible = payload["question"]
+                if set(visible) != {"question_id", "dataset", "stem"} or visible != expected_visible:
+                    issues.append(f"{label}/{attempt_index}: model request includes non-stem question data")
+            wire = attempt.get("wire_request") or {}
+            users = [x["content"] for x in wire.get("messages", []) if x.get("role") == "user"]
+            if users and (len(users) != 1 or json.loads(users[0]) != payload):
+                issues.append(f"{label}/{attempt_index}: wire request differs from saved payload")
+            if attempt_index < len(row["model_calls"]) - 1:
+                try:
+                    prior = json.loads(attempt["raw_response"]["choices"][0]["message"]["content"])["queries"]
+                    prior_valid = (isinstance(prior, list) and len(prior) == 2 and all(
+                        isinstance(term, str) and term.strip() and len(term) <= 500 and re.search(r"\bAND\b", term, re.I)
+                        for term in prior))
+                    if prior_valid:
+                        issues.append(f"{label}/{attempt_index}: prior valid query call was unnecessarily replaced")
+                except (KeyError, IndexError, TypeError, json.JSONDecodeError):
+                    pass  # 结构失败也允许一次有界重试；原调用和用量仍保留。
+        call = row["model_calls"][-1]
         try:
             generated = json.loads(call["raw_response"]["choices"][0]["message"]["content"])["queries"]
             if generated != row["queries"]:
@@ -87,8 +118,14 @@ def audit(folder: Path) -> dict:
             if snapshot["query"] != entry["query"] or parse_qs(urlparse(snapshot["search_url"]).query).get("sort") != ["relevance"]:
                 issues.append(f"{label}/{j}: search query or sort differs")
             for attempt in entry["attempts"]:
-                if attempt.get("raw_file") and base.sha((folder / attempt["raw_file"]).read_bytes()) != attempt["raw_sha256"]:
-                    issues.append(f"{label}/{j}: raw attempt hash mismatch")
+                if attempt.get("raw_file"):
+                    expected_hash = attempt.get("raw_sha256")
+                    if not expected_hash and attempt.get("status") == "failed":
+                        if failure_hashes.get("manifest_sha256") != base.sha(manifest_raw):
+                            issues.append(f"{label}/{j}: missing failure-body hash provenance")
+                        expected_hash = failure_hashes.get("files", {}).get(attempt["raw_file"])
+                    if base.sha((folder / attempt["raw_file"]).read_bytes()) != expected_hash:
+                        issues.append(f"{label}/{j}: raw attempt hash mismatch")
             if base.sha((folder / snapshot["raw_esearch_file"]).read_bytes()) != snapshot["raw_esearch_sha256"]:
                 issues.append(f"{label}/{j}: raw ESearch hash mismatch")
             ids = json.loads((folder / snapshot["raw_esearch_file"]).read_bytes())["esearchresult"]["idlist"]

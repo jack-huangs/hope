@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from decimal import Decimal
 import math
 import time
-from typing import Any
+from typing import Any, Iterable
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,16 @@ class Budget:
         self.tokens += int(usage.get("total_tokens") or 0)
 
 
+def probability_sum_within_tolerance(values: Iterable[int | float]) -> bool:
+    """按输出数值的十进制表示判断原有 ±0.01（含边界）容差，不改概率。
+
+    调用方先检查数值类型、有限性和范围。0.99 的二进制浮点差可能
+    略大于 0.01；Decimal(str(v)) 避免该误报，也不扩大十进制容差。
+    """
+    total = sum((Decimal(str(value)) for value in values), Decimal(0))
+    return abs(total - Decimal(1)) <= Decimal("0.01")
+
+
 def validate_answer(data: dict[str, Any], options: dict[str, str], evidence_ids: set[str],
                     message_ids: set[str]) -> dict[str, Any]:
     """在入图前检查完整概率、合法选项和真实可见的引用。"""
@@ -110,7 +121,7 @@ def validate_answer(data: dict[str, Any], options: dict[str, str], evidence_ids:
         raise ValueError("probabilities must include every option exactly once")
     if any(not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or not 0 <= v <= 1 for v in probs.values()):
         raise ValueError("invalid probability value")
-    if abs(sum(probs.values()) - 1) > 0.01:
+    if not probability_sum_within_tolerance(probs.values()):
         raise ValueError("probabilities must sum to one")
     cites = data.get("citations", [])
     if not isinstance(cites, list) or not all(isinstance(x, str) and (x in evidence_ids or x in message_ids) for x in cites):

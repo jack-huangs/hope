@@ -149,7 +149,7 @@ def parse_xml(raw: bytes, fetched_at: str) -> tuple[list[dict], list[dict]]:
 
 
 def prepare(source: Path, output: Path, max_records: int = 8, retries: int = 2,
-            pause: float = 1.0, backoff: float = 1.0) -> dict:
+            pause: float = 1.0, backoff: float = 1.0, reuse_source: Path | None = None) -> dict:
     if max_records < 1 or retries < 0 or pause < 0 or backoff < 0:
         raise ValueError("Invalid retrieval limits")
     source, output = source.resolve(), output.resolve()
@@ -160,6 +160,9 @@ def prepare(source: Path, output: Path, max_records: int = 8, retries: int = 2,
               "script_sha256": sha(Path(__file__).read_bytes()), "sort": "relevance",
               "max_records": max_records, "retries": retries}
     fingerprint = sha(canonical(config))
+    if reuse_source:
+        config["reuse_manifest_sha256"] = sha((reuse_source / "preparation_manifest.json").read_bytes())
+        fingerprint = sha(canonical(config))
     path = output / "preparation_manifest.json"
     if output.exists() and not path.exists() and any(output.iterdir()):
         raise FileExistsError("Output has files but no relevance manifest")
@@ -183,6 +186,9 @@ def prepare(source: Path, output: Path, max_records: int = 8, retries: int = 2,
                     "source_known_tokens": parent["known_tokens"], "new_model_calls": 0,
                     "question_ids": parent["question_ids"],
                     "forbidden_pubmedqa_pmids": parent["forbidden_pubmedqa_pmids"], "records": records}
+        if reuse_source:
+            from reuse_query_snapshot import reuse_rows
+            reuse_rows(output, manifest, reuse_source)
         save_json(path, manifest)
     forbidden = set(manifest["forbidden_pubmedqa_pmids"])
     base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"

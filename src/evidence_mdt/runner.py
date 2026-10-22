@@ -13,7 +13,8 @@ from typing import Any
 
 from .models import Model, ModelResponseError
 from .retrieval import Retriever
-from .schema import AgentTurn, Budget, Claim, DependencyEdge, Evidence, Question, validate_answer
+from .schema import (AgentTurn, Budget, Claim, DependencyEdge, Evidence, Question,
+                     probability_sum_within_tolerance, validate_answer)
 
 
 GROUPS = ("ordinary", "semantic", "semantic_retrieval")
@@ -338,7 +339,7 @@ class Runner:
                         or any(not isinstance(p, (int, float)) or isinstance(p, bool)
                                or not math.isfinite(p) or not 0 <= p <= 1
                                for p in original_probs.values())
-                        or abs(sum(original_probs.values()) - 1) > 0.01):
+                        or not probability_sum_within_tolerance(original_probs.values())):
                     raise repair_error
                 stated = original.get("answer")
                 if stated in question.options:

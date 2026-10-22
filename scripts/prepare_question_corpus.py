@@ -49,7 +49,10 @@ def public_model_config(model: Any, backend: str) -> dict[str, Any]:
 
 
 def query_payload(question: Any) -> dict[str, Any]:
-    return {"task": "queries", "question": question.public(),
+    # 官方 MedXpertQA 把选项也拼进题干；检索查询只接收前面的病例和问句。
+    stem = question.stem.split("\nAnswer Choices:", 1)[0]
+    return {"task": "queries", "question": {"question_id": question.question_id,
+            "dataset": question.dataset, "stem": stem},
             "purpose": "Generate faithful PubMed search queries from the question stem before any agent answers.",
             "constraints": ("Return at most two concise English search queries within 64 tokens. "
                             "Use only the stem; ignore options and context. "

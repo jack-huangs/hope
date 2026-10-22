@@ -11,9 +11,9 @@ $py = 'C:\Users\Administrator\miniconda3\envs\med-consensus\python.exe'
 & $py -m evidence_mdt.cli prepare --source pilot --output data/pilot --seed 20261008
 ```
 
-`data/pilot/pilot50.jsonl` 是 30 道 MedQA 加 20 道 PubMedQA。`data/pilot/MedXpertQA.jsonl` 是单独的 20 道备用题，只有满足计划中的 MedQA 难度门槛才纳入后续主比较。数据文件和运行记录位于 `.gitignore` 排除的 `data/`、`runs/`、`indexes/`。
+历史预筛材料包括 30 道 MedQA 和原 20 道 PubMedQA；MedXpertQA 曾作为 20 道备用题。后续实验题集调整为 30 道 MedXpertQA 加原 20 道 PubMedQA。数据文件和运行记录位于 `.gitignore` 排除的 `data/`、`runs/`、`indexes/`。
 
-`selection_manifest.json` 保存原始下载 URL、SHA-256、随机种子、抽样框大小和选中的源 ID。MedQA 使用**第三方 BigBio 镜像训练集前 1000 行**作为固定抽样框，从中随机抽 30 道；这不是从全部 MedQA 训练题随机抽样。PubMedQA 来自官方 `ori_pqal.json`；模型可见题干和 `CONTEXTS`，看不到 `LONG_ANSWER`、金标或预测答案。MedXpertQA Text 来自官方测试集，属于探索备用题，不称为训练集。题目只用于探索，正式确认需另取未参与探索的新题。
+`selection_manifest.json` 保存原始下载 URL、SHA-256、随机种子、抽样框大小和选中的源 ID。MedQA 使用**第三方 BigBio 镜像训练集前 1000 行**作为固定抽样框，从中随机抽 30 道；这不是从全部 MedQA 训练题随机抽样。PubMedQA 来自官方 `ori_pqal.json`；模型可见题干和 `CONTEXTS`，看不到 `LONG_ANSWER`、金标或预测答案。MedXpertQA Text 来自官方测试集，不称为训练集。题目只用于探索，正式确认需另取未参与探索的新题。
 
 ## 检索与运行
 
@@ -24,15 +24,17 @@ $py = 'C:\Users\Administrator\miniconda3\envs\med-consensus\python.exe'
 & $py -m evidence_mdt.cli index --corpus data/pubmed.jsonl --backend medcpt --output indexes/pubmed.json
 ```
 
+这些命令展示单次运行流程；第一条示例以 `--repeats 1` 运行，不能用于判定历史 54/60 难度门槛。
+
 MedCPT 使用固定版本的 Query、Article、Cross Encoder；本机可读取 `indexes/model_download_manifest.json` 的本地快照和 revision。Query 最长 64 token，Article 最长 512 token。BM25 和向量召回各取前 50，同 `chunk_id` 做 RRF 融合，再取前 30 交给 Cross Encoder 重排。`mock` 检索只供流程测试，不能当真实检索报告。
 
 五题真实烟测可先运行 `& $py scripts/prepare_smoke_corpus.py`。它固定取已抽出的前三道 MedQA、前两道 PubMedQA，调用 DeepSeek 生成不作答的简短 PubMed 查询，下载每条查询最多 8 篇摘要，并保存请求、返回、空结果、原始 XML 与哈希到 `data/smoke/`。该命令会调用付费 API；运行前先检查脚本和预算。其小语料只用于软件与成本烟测，不能用于正式 50 题比较。
 
-30 道 MedQA 的普通组难度预筛可单独跑；两次独立运行共 60 个主持者答案，若正确数至少 54，再切换临床题集。主比较再使用 `--groups all`。真实 DeepSeek 运行从项目根目录的 `.env` 读取 `DEEPSEEK_API_KEY`；当前已配置密钥，`.env` 被 Git 忽略，`.env.example` 只列变量名和空白占位。实际 API 调用会产生费用。
+历史上的 30 道 MedQA 普通组难度预筛定义为两次独立运行、共 60 个主持者答案，门槛为至少 54 个正确；该历史校验定义保持不变。后续每题每条件默认运行一次，使用 `--groups all`。`--repeats` 表示独立重复运行次数；每次运行内仍有四位专家和四轮顺序讨论。B 条件名 `literal3` 中的 3 表示三条暴露材料，不表示重复运行次数。真实 DeepSeek 运行从项目根目录的 `.env` 读取 `DEEPSEEK_API_KEY`；`.env` 被 Git 忽略，`.env.example` 只列变量名和空白占位。实际 API 调用会产生费用。
 
 ```powershell
-& $py -m evidence_mdt.cli run --questions data/pilot/MedQA.jsonl --corpus data/pubmed.jsonl --output runs/medqa-screen --model-backend deepseek --retrieval-backend medcpt --index-manifest indexes/pubmed.json --query-manifest data/pilot/short_queries.jsonl --groups ordinary --repeats 2
-& $py -m evidence_mdt.cli run --questions data/pilot/pilot50.jsonl --corpus data/pubmed.jsonl --output runs/pilot --model-backend deepseek --retrieval-backend medcpt --index-manifest indexes/pubmed.json --query-manifest data/pilot/short_queries.jsonl --groups all --repeats 2
+& $py -m evidence_mdt.cli run --questions data/pilot/MedQA.jsonl --corpus data/pubmed.jsonl --output runs/medqa-screen --model-backend deepseek --retrieval-backend medcpt --index-manifest indexes/pubmed.json --query-manifest data/pilot/short_queries.jsonl --groups ordinary --repeats 1
+& $py -m evidence_mdt.cli run --questions data/pilot/pilot50.jsonl --corpus data/pubmed.jsonl --output runs/pilot --model-backend deepseek --retrieval-backend medcpt --index-manifest indexes/pubmed.json --query-manifest data/pilot/short_queries.jsonl --groups all --repeats 1
 & $py -m evidence_mdt.cli evaluate --results runs/pilot/results.jsonl --output runs/pilot/report.json
 ```
 
