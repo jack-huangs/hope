@@ -19,6 +19,13 @@ def audit(folder: Path) -> dict:
     folder = folder.resolve()
     manifest_raw = (folder / "preparation_manifest.json").read_bytes()
     manifest = json.loads(manifest_raw)
+    protocol = manifest.get('config', {}).get('query_protocol', '')
+    relaxed = 'no-required-boolean' in protocol
+    allow_three = 'accept-2-or-3' in protocol
+    def valid_query_list(queries):
+        return (isinstance(queries, list) and len(queries) in ((2, 3) if allow_three else (2,))
+                and all(isinstance(term, str) and term.strip() and len(term) <= 500
+                        and (relaxed or re.search(r'\bAND\b', term, re.I)) for term in queries))
     failure_hash_path = folder / "failed_response_hashes.json"
     failure_hashes = json.loads(failure_hash_path.read_bytes()) if failure_hash_path.exists() else {}
     source = Path(manifest["source_snapshot"])
@@ -62,8 +69,8 @@ def audit(folder: Path) -> dict:
             if row["status"] != "not_triggered" or row["model_calls"] or row["snapshots"]:
                 issues.append(f"{label}: unselected question was processed")
             continue
-        if row["status"] != "ready" or not 1 <= len(row["model_calls"]) <= 3 or len(row["queries"]) != 2:
-            issues.append(f"{label}: selected question not ready with bounded calls and two queries")
+        if row["status"] != "ready" or not 1 <= len(row["model_calls"]) <= 3 or not valid_query_list(row["queries"]):
+            issues.append(f"{label}: selected question not ready with bounded calls and protocol-valid queries")
             continue
         if len(row["model_calls"]) == 3 and row["model_calls"][-1].get("call_kind") != "query_format_repair":
             issues.append(f"{label}: third call is not an explicit format repair")
@@ -94,9 +101,7 @@ def audit(folder: Path) -> dict:
             if attempt_index < len(row["model_calls"]) - 1:
                 try:
                     prior = json.loads(attempt["raw_response"]["choices"][0]["message"]["content"])["queries"]
-                    prior_valid = (isinstance(prior, list) and len(prior) == 2 and all(
-                        isinstance(term, str) and term.strip() and len(term) <= 500 and re.search(r"\bAND\b", term, re.I)
-                        for term in prior))
+                    prior_valid = valid_query_list(prior)
                     if prior_valid:
                         issues.append(f"{label}/{attempt_index}: prior valid query call was unnecessarily replaced")
                 except (KeyError, IndexError, TypeError, json.JSONDecodeError):

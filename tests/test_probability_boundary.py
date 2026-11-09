@@ -1,6 +1,5 @@
 """真实失败只提取概率向量；其余输入均为合成离线夹具，不使用医学答案。"""
 import copy
-import itertools
 
 import pytest
 
@@ -8,7 +7,7 @@ from evidence_mdt.metrics import _valid_probabilities
 from evidence_mdt.models import Model, ModelResult
 from evidence_mdt.retrieval import MockDense, Retriever
 from evidence_mdt.runner import Runner
-from evidence_mdt.schema import Question, probability_sum_within_tolerance, validate_answer
+from evidence_mdt.schema import Question, validate_answer
 
 
 REAL_VECTORS = [
@@ -55,38 +54,30 @@ def test_real_boundary_vectors_pass_without_repair_or_numeric_change(tmp_path, p
     assert _valid_probabilities({**original, "options": list(probs), "gold": "A"})
 
 
-@pytest.mark.parametrize("values", [[0.85, 0.03, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01],
-                                   [0.87, 0.03, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01]])
-def test_inclusive_boundaries_ignore_order(values):
-    # Rotate/reverse all positions, plus unique permutations of a shorter vector.
-    for n in range(len(values)):
-        rotated = values[n:] + values[:n]
-        assert probability_sum_within_tolerance(rotated)
-        assert probability_sum_within_tolerance(reversed(rotated))
-    for perm in itertools.permutations([values[0], 0.03, round(sum(values[2:]), 2)]):
-        assert probability_sum_within_tolerance(perm)
+@pytest.mark.parametrize('probs',[{'A':0.2,'B':0.3},{'A':0.9,'B':0.8},{'A':0,'B':0},
+                                {'A':0.989,'B':0},{'A':1,'B':0.011}])
+def test_nonunit_sums_preserved_without_repair(tmp_path,probs):
+    original=response(copy.deepcopy(probs));model=VectorModel(original)
+    turn=runner_turn(tmp_path,model,probs)
+    assert model.tasks==['answer']
+    assert turn.probabilities==probs and turn.raw_response==original
+    assert _valid_probabilities({**original,'options':['A','B'],'gold':'A'})
 
 
 @pytest.mark.parametrize("probs", [
-    {"A": 0.989, "B": 0}, {"A": 1, "B": 0.011},
-    {"A": 0.989999999999, "B": 0}, {"A": 1, "B": 0.010000000001},
-    {"A": 0, "B": 0}, {"A": -0.01, "B": 1},
+    {"A": -0.01, "B": 1}, {"A":1.01,"B":0},
     {"A": True, "B": 0}, {"A": float("nan"), "B": 0},
     {"A": float("inf"), "B": 0}, {"A": 1}, {},
 ])
 def test_invalid_vectors_rejected_by_all_paths_without_repair(tmp_path, probs):
     original = response(probs)
     with pytest.raises(ValueError):
-        validate_answer(original, {"A": "a", "B": "b"}, set(), set())
+        validate_answer(original, {"A": "a", "B": "b"})
     assert not _valid_probabilities({**original, "options": ["A", "B"], "gold": "A"})
     model = VectorModel(original, response({"A": 1, "B": 0}))
     with pytest.raises(ValueError):
         runner_turn(tmp_path, model, ["A", "B"])
     assert model.tasks == ["answer"]
-
-
-def test_empty_sum_is_not_valid():
-    assert not probability_sum_within_tolerance([])
 
 
 def test_valid_boundary_can_repair_structure_but_not_probabilities(tmp_path):

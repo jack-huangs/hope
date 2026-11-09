@@ -50,7 +50,7 @@ def test_partial_report_counts_attempts_usage_and_hides_raw_content(tmp_path):
     assert report["supplement"]["new_chunks_in_attempt_events"] == 1
     assert report["supplement"]["criteria_met_completed_runs"] == 0
     assert report["supplement"]["eligible_triggered_completed_runs"] == 0
-    assert report["natural_by_dataset_group"]["MedQA/ordinary/natural"]["brier_denominator"] == 1
+    assert report["baseline_by_dataset_group"]["MedQA/ordinary/natural"]["brier_denominator"] == 1
     output = json.dumps(report, ensure_ascii=False) + render_markdown(report)
     assert all(secret not in output for secret in
                ("PRIVATE_QUESTION", "PRIVATE_RAW", "PRIVATE_REPAIR", "PRIVATE_BAD_RESPONSE", "secret-id"))

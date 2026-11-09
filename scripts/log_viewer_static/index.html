@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>模型对话与证据图谱 · 实验日志查看器</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/graph.css"><script src="/graph.js" defer></script><script src="/app.js" defer></script></head>
+<body>
+<header class="topbar"><a class="brand" href="/" aria-label="首页"><span class="brand-icon">M</span><span>MDT <b>实验日志</b></span></a><span class="local"><i></i>本地 · 只读</span><button id="refresh" class="quiet">↻ 刷新日志</button></header>
+<main>
+<section class="intro"><div><p class="eyebrow">MODEL CONVERSATIONS</p><h1>看清每一次模型对话</h1><p class="subtitle">从一道题，追溯到专家的每次请求、回答与最终判断。</p></div><div class="intro-note"><span class="dot"></span>只读取已有日志<br><span>不会发起新的模型调用</span></div></section>
+<form id="search-form" class="searchbar"><div class="search-field"><label for="query">题号 / RUN ID / 题目关键词</label><div><span aria-hidden="true">⌕</span><input id="query" autocomplete="off" placeholder="例如 803，或 803:repeat-1:natural:ordinary"></div></div><div class="batch-field"><label for="batch">实验批次</label><select id="batch"><option value="all">全部批次</option></select></div><button class="primary" type="submit">查找对话 <span>↗</span></button></form>
+<div id="notice" role="status" aria-live="polite"></div>
+<div class="workspace">
+<aside class="case-panel"><div class="panel-title"><h2>匹配的实验</h2><span id="result-count" class="counter">—</span></div><p class="hint">同一道题的不同批次、方法与重复运行分别列出。</p><div id="case-list"><div class="placeholder">输入题号后点击「查找对话」。</div></div></aside>
+<section id="detail-panel" class="detail-panel"><div class="welcome"><div class="welcome-symbol">≋</div><h2>选择一次实验，展开完整过程</h2><p>左侧查找题目，右侧按时间阅读模型收到的内容和实际返回。<br>系统提示词、专家讨论和失败调用，都可以逐条查看。</p><div class="examples"><button data-example="803">查看第 803 题 ↗</button><button data-example="586">查看第 586 题 ↗</button></div></div></section>
+</div>
+<footer>原始日志原文展示 · 标准答案仅用于结果对照，不代表已发给模型 · 查看失败重试时请注意批次与执行记录</footer>
+</main>
+<div id="toast" role="status"></div>
+</body></html>

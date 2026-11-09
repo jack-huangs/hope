@@ -9,13 +9,27 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
-from .schema import probability_sum_within_tolerance
+
+
+def baseline_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """全部输入题的 B:base；旧 natural 仅在同题/重复/组没有 B:base 时回退。"""
+    def key(row):
+        return tuple(row.get(k) for k in ("dataset", "question_id", "repeat_id", "group"))
+    preferred = {key(r) for r in records if r.get("variant") == "B:base"}
+    return [r for r in records if r.get("variant") == "B:base" or
+            (r.get("variant", "natural") == "natural" and key(r) not in preferred)]
+
+
+def canonical_baselines(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """仅供报告的浅副本；保留 run_id 指向原始日志，不改写历史文件。"""
+    return ([r for r in records if r.get("variant", "natural") not in {"natural", "B:base"}]
+            + [{**r, "variant": "B:base"} for r in baseline_records(records)])
 
 
 def _valid_probabilities(row: dict[str, Any], require_options: bool = True) -> bool:
     probs = row.get("probabilities")
     gold = row.get("gold")
-    if not isinstance(probs, dict) or not probs or gold not in probs:
+    if not isinstance(probs, dict) or len(probs) < 2 or gold not in probs:
         return False
     expected = row.get("options")
     if require_options and not isinstance(expected, (dict, list, tuple)):
@@ -25,7 +39,7 @@ def _valid_probabilities(row: dict[str, Any], require_options: bool = True) -> b
     if any(not isinstance(p, (float, int)) or isinstance(p, bool)
            or not math.isfinite(p) or not 0 <= p <= 1 for p in probs.values()):
         return False
-    return probability_sum_within_tolerance(probs.values())
+    return True
 
 
 def brier(probabilities: dict[str, float], gold: str) -> float:
@@ -168,8 +182,10 @@ def summarize(records: list[dict[str, Any]],
 
 def paired_cluster_bootstrap(records: list[dict[str, Any]], group_a: str, group_b: str,
                              iterations: int = 1000, seed: int = 20261008,
-                             dataset: str | None = None, variant: str = "natural") -> dict[str, Any]:
+                             dataset: str | None = None, variant: str = "B:base") -> dict[str, Any]:
     """同题、同 repeat、同 variant 配对；以题目为簇重采样。"""
+    if variant == "B:base":
+        records = canonical_baselines(records)
     if iterations < 1:
         raise ValueError("iterations must be positive")
     datasets = sorted({r["dataset"] for r in records if r.get("dataset") and
@@ -217,28 +233,59 @@ def paired_cluster_bootstrap(records: list[dict[str, Any]], group_a: str, group_
 
 
 def b_target_probability_change(records: list[dict[str, Any]]) -> dict[str, Any]:
-    """B 干预相对同题、同 repeat、同方法的 B:base 条件。"""
+    return _target_probability_change(records, "B", "b_target_answer")
+
+
+def d_target_probability_change(records: list[dict[str, Any]]) -> dict[str, Any]:
+    return _target_probability_change(records, "D", "d_target_answer")
+
+
+def _target_probability_change(records: list[dict[str, Any]], family: str,
+                               target_field: str) -> dict[str, Any]:
+    """相对同题、同repeat、同方法的实际B:base；原始数值不归一化。"""
     baseline = {(r.get("dataset"), r.get("question_id"), r.get("repeat_id"), r.get("group")): r
                 for r in records if r.get("variant") == "B:base"}
     grouped: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     missing: dict[tuple[str, str, str], int] = defaultdict(int)
+    unannotated: dict[tuple[str, str, str], int] = defaultdict(int)
+    totals: dict[tuple[str, str, str], int] = defaultdict(int)
     for row in records:
         variant = row.get("variant", "")
-        if not variant.startswith("B:") or variant == "B:base":
+        if not variant.startswith(family + ":") or variant == "B:base":
             continue
         key = (row.get("dataset"), row.get("group"), variant)
+        totals[key] += 1
         base = baseline.get((row.get("dataset"), row.get("question_id"), row.get("repeat_id"), row.get("group")))
-        target = row.get("b_target_answer") or row.get("target_answer") or row.get("target_option")
-        if (not base or not target or not _valid_probabilities(base)
+        def target_of(value):
+            if family == "B":
+                # Explicit null is an unannotated target, not permission to use a legacy field.
+                for field in (target_field, "target_answer", "target_option"):
+                    if field in value:
+                        return value[field]
+                return None
+            return value.get(target_field)
+        target = target_of(row)
+        base_target = target_of(base) if base else None
+        if family == "B" and target is None:
+            unannotated[key] += 1
+            continue
+        if (not base or not target or (family == "D" and target == row.get("gold"))
+                or (base_target is not None and base_target != target)
+                or base.get("status", "ok") != "ok" or row.get("status", "ok") != "ok"
+                or not _valid_probabilities(base)
                 or not _valid_probabilities(row) or target not in base["probabilities"]
                 or target not in row["probabilities"]):
             missing[key] += 1
             continue
         grouped[key].append(row["probabilities"][target] - base["probabilities"][target])
-    keys = sorted(set(grouped) | set(missing))
+    keys = sorted(set(totals))
     return {"/".join(key): {"n_valid_pairs": len(grouped[key]), "n_missing_or_invalid": missing[key],
+                            "n_intervention_trials": totals[key],
+                            "n_excluded_no_target_annotation": unannotated[key],
                             "mean_delta_target_probability": _mean_or_none(grouped[key]),
-                            "note": "Descriptive B stress test; position and length were not controlled."}
+                            "note": (f"Descriptive {family} stress test on raw values; values are not normalized or guaranteed to sum to one. "
+                                     "Unannotated B targets are excluded only from this target-change statistic; other outcome metrics retain them. "
+                                     "The annotated subset does not represent all questions.")}
             for key in keys}
 
 

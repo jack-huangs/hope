@@ -35,12 +35,33 @@ def test_mock_audit_has_full_trace_without_gold(tmp_path):
     summary = module.audit(snapshot, output, "mock")
     assert summary["questions"] == 1 and summary["total_citations"] == 1
     row = module.read_jsonl(output / "retrieval_trace.jsonl")[0]
-    assert row["top6"][0]["evidence"]["chunk_id"] == "PMID:456:abstract"
-    assert row["top6"][0]["from_this_question"] is True
-    assert row["top6"][0]["scores"]["reranked"] is not None
+    assert row["top10"][0]["evidence"]["chunk_id"] == "PMID:456:abstract"
+    assert row["top10"][0]["from_this_question"] is True
+    assert row["top10"][0]["scores"]["reranked"] is not None
     assert all(key in row["trace"] for key in ("bm25_top50", "dense_top50", "rrf_top30", "reranked"))
     assert "gold" not in json.dumps(row)
     assert module.audit(snapshot, output, "mock") == summary
+
+
+def test_audit_uses_ten_passages_and_reports_full_count_range(tmp_path):
+    snapshot = fixture_snapshot(tmp_path)
+    template = module.read_jsonl(snapshot / "corpus.jsonl")[0]
+    corpus = [{**template, "chunk_id": f"PMID:{i}:abstract", "document_id": f"PMID:{i}"}
+              for i in range(500, 512)]
+    (snapshot / "corpus.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in corpus), encoding="utf-8")
+    manifest_path = snapshot / "preparation_manifest.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    manifest["corpus_sha256"] = module.sha((snapshot / "corpus.jsonl").read_bytes())
+    manifest["chunk_sources"] = {row["chunk_id"]: [{"question_id": "123", "query_index": 0, "query": "alpha"}]
+                                 for row in corpus}
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    output = tmp_path / "audit"
+    summary = module.audit(snapshot, output, "mock")
+    assert summary["total_citations"] == 10
+    assert summary["top10_count_distribution"]["10"] == 1
+    assert set(summary["top10_count_distribution"]) == {str(i) for i in range(11)}
+    assert len(module.read_jsonl(output / "retrieval_trace.jsonl")[0]["top10"]) == 10
 
 
 def test_rejects_answer_field_and_mismatched_corpus(tmp_path):

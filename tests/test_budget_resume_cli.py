@@ -15,7 +15,7 @@ def test_new_science_budget_increase_keeps_completed_record_and_resumes(tmp_path
     questions = tmp_path / "questions.jsonl"
     corpus = tmp_path / "corpus.jsonl"
     output = tmp_path / "run"
-    write_jsonl(questions, [Question("fixture", "Fixture", "alpha?", {"A": "alpha", "B": "beta"}, "A")])
+    write_jsonl(questions, [Question("fixture", "MedXpertQA", "alpha?", {"A": "alpha", "B": "beta"}, "A")])
     write_jsonl(corpus, [Evidence("e", "doc", "alpha evidence", "local")])
     argv = ["run", "--questions", str(questions), "--corpus", str(corpus), "--output", str(output),
             "--model-backend", "mock", "--retrieval-backend", "mock", "--groups", "ordinary",
@@ -55,7 +55,7 @@ def test_legacy_resume_rejects_scientific_change(tmp_path):
     questions = tmp_path / "questions.jsonl"
     corpus = tmp_path / "corpus.jsonl"
     output = tmp_path / "run"
-    write_jsonl(questions, [Question("fixture", "Fixture", "alpha?", {"A": "alpha", "B": "beta"}, "A")])
+    write_jsonl(questions, [Question("fixture", "MedXpertQA", "alpha?", {"A": "alpha", "B": "beta"}, "A")])
     write_jsonl(corpus, [Evidence("e", "doc", "alpha evidence", "local")])
     argv = ["run", "--questions", str(questions), "--corpus", str(corpus), "--output", str(output),
             "--model-backend", "mock", "--retrieval-backend", "mock", "--groups", "ordinary",

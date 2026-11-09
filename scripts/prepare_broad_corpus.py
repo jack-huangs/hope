@@ -5,7 +5,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import shutil
 import sys
 import time
@@ -34,17 +33,16 @@ def model_payload(question: dict) -> dict:
     return {"task": "queries", "question": {"question_id": question["question_id"],
               "dataset": question["dataset"], "stem": question["stem"].split("\nAnswer Choices:", 1)[0]},
             "purpose": "Broad PubMed abstract recall when two frozen narrow queries yielded fewer than 3 unique abstracts",
-            "constraints": ("Return exactly two short PubMed Boolean queries. Each query should use only 2-3 core medical "
-                            "concepts, combining synonyms with OR and concepts with AND. Do not require all case "
+            "constraints": ("Return exactly two short PubMed search queries. Each query should use only 2-3 core medical "
+                            "concepts. Do not require all case "
                             "details. Do not answer the question, mention an option, or infer the correct choice. "
                             "Use only the stem, without background, options, answer labels, or prior retrieval results.")}
 
 
 def validate_queries(queries) -> list[str]:
-    if (not isinstance(queries, list) or len(queries) != 2 or
-            any(not isinstance(q, str) or not q.strip() or len(q) > 500 or
-                not re.search(r"\bAND\b", q, flags=re.I) for q in queries)):
-        raise ValueError("Model must return exactly two short PubMed Boolean queries with AND")
+    if (not isinstance(queries, list) or not 2 <= len(queries) <= 3 or
+            any(not isinstance(q, str) or not q.strip() or len(q) > 500 for q in queries)):
+        raise ValueError("Model must return two or three nonempty PubMed search queries (max 500 characters each)")
     return [q.strip() for q in queries]
 
 
@@ -89,7 +87,7 @@ def totals(manifest: dict) -> tuple[int, int]:
 def prepare(source: Path, output: Path, max_records: int = 8, max_model_calls: int = 20,
             max_tokens: int = 30000, backend: str = "deepseek", retries: int = 2,
             pause: float = 1.0, backoff: float = 1.0, reuse_source: Path | None = None,
-            query_protocol: str = "stem-only-2-to-3-core-concepts-v1",
+            query_protocol: str = "stem-only-2-to-3-core-concepts-accept-2-or-3-no-required-boolean-v3",
             format_repair_sha256: str | None = None) -> dict:
     if max_records < 1 or max_model_calls < 0 or max_tokens < 0 or retries < 0 or pause < 0:
         raise ValueError("Invalid limits")
@@ -141,8 +139,7 @@ def prepare(source: Path, output: Path, max_records: int = 8, max_model_calls: i
                     "selected_questions": selected, "forbidden_pubmedqa_pmids": parent["forbidden_pubmedqa_pmids"],
                     "records": records}
         if reuse_source:
-            from reuse_query_snapshot import reuse_rows
-            reuse_rows(output, manifest, reuse_source, broad=True)
+            base.reuse_rows(output, manifest, reuse_source, broad=True)
         base.save_json(manifest_path, manifest)
     forbidden = set(manifest["forbidden_pubmedqa_pmids"])
     base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"

@@ -37,7 +37,12 @@ def test_full_manifest_can_serve_medqa_prescreen_subset(tmp_path):
 
 
 def test_cli_rejects_medcpt_model_revision_mismatch_before_calls(tmp_path, monkeypatch):
+    from dataclasses import replace
     questions, _rows, query_path = fixture(tmp_path)
+    questions = [replace(q, dataset="MedXpertQA") for q in questions]
+    write_jsonl(query_path, [{"question_id": q.question_id, "dataset": q.dataset,
+                            "public_question_sha256": public_question_sha256(q),
+                            "retrieval_query": "short query"} for q in questions])
     questions_path = tmp_path / "questions.jsonl"
     corpus_path = tmp_path / "corpus.jsonl"
     manifest_path = tmp_path / "index.json"

@@ -1,5 +1,6 @@
 """用小型原始日志验证审计口径，不调用模型。"""
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -54,6 +55,21 @@ def test_failed_attempt_isolated_and_message_citation_traced():
 def test_high_confidence_is_separate_threshold():
     result, events = fixture(probability=.8)
     assert MODULE.analyze_result(result, events)["high_confidence_common_error"] is True
+
+
+def test_baseline_report_reads_new_b_base_and_prefers_it_to_legacy_natural(tmp_path):
+    old, events = fixture(probability=.8)
+    new = {**old, "variant": "B:base", "run_id": old["run_id"].replace(":natural:", ":B:base:")}
+    # 新结果找不到对应事件时应诚实报告缺日志，不能偷拿旧natural的成功日志。
+    (tmp_path / "results.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in [old, new]) + "\n", encoding="utf-8")
+    (tmp_path / "events.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+    report = MODULE.make_report(tmp_path)
+    assert len(report["cases"]) == 1
+    assert report["cases"][0]["run_id"] == new["run_id"]
+    assert report["cases"][0]["complete_log"] is False
+    assert "baseline" in report["scope"]
 
 
 def test_no_citation_is_unknown_not_zero_overlap():

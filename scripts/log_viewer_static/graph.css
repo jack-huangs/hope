@@ -1,0 +1,58 @@
+[hidden]{display:none!important}
+.case-tabs{display:flex;gap:26px;padding:0 28px;border-bottom:1px solid var(--line);background:#fff}
+.case-tabs button{border:0;border-bottom:3px solid transparent;padding:17px 0 14px;background:none;color:var(--muted);font-size:13px;font-weight:600}
+.case-tabs button[aria-selected=true]{color:var(--teal);border-bottom-color:var(--teal)}
+#view-graph{padding:24px 28px 30px;min-width:0}
+.graph-intro,.graph-detail-header{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.graph-intro h3,.graph-detail h3{font-size:17px;font-weight:650;margin:0 0 8px}
+.graph-intro p{font-size:12px;margin:0;color:var(--muted)}
+.graph-note{font-size:12px;line-height:1.85;color:#58726a;background:#eef6f2;border:1px solid #dceae2;border-radius:8px;padding:12px 14px;margin:18px 0}
+.graph-warning,.graph-empty-note{font-size:11px;line-height:1.8;color:#8b783b;margin:8px 0}
+.graph-controls{display:flex;align-items:end;gap:14px;flex-wrap:wrap;margin:21px 0 15px}
+.graph-control{display:flex;flex-direction:column;gap:7px;font-size:10px;color:var(--muted)}
+.graph-control select{padding:8px;border:1px solid var(--line);border-radius:6px;background:white;color:var(--ink);font-size:12px;max-width:230px}
+.graph-check{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);padding-bottom:8px;cursor:pointer}
+.graph-check input{accent-color:var(--teal)}
+.graph-zoom{display:flex;align-items:center;gap:6px;margin-left:auto}
+.graph-zoom span{font:11px ui-monospace,monospace;min-width:38px;text-align:center;color:var(--muted)}
+.graph-zoom .quiet{padding:7px 10px;font-size:12px}
+.graph-legend{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;font-size:10px;color:var(--muted);align-items:center}
+.graph-legend>span{display:inline-flex;align-items:center;gap:5px}
+.graph-legend>span:before{content:'';width:7px;height:7px;display:block;border-radius:2px;background:#506879}
+.graph-legend>[data-kind=evidence]:before{background:#3c8978}.graph-legend>[data-kind=turn]:before{background:#547bba}.graph-legend>[data-kind=claim]:before{background:#aa7e39}.graph-legend>[data-kind=cluster]:before{background:#9270ae}.graph-legend>[data-kind=answer]:before{background:#226f59}
+.graph-legend small{font-size:10px;margin-left:auto}
+.graph-caption{font-size:11px;line-height:1.7;color:var(--muted);margin:0 0 10px}
+.graph-viewport{width:100%;height:560px;overflow:auto;border:1px solid #dce6e2;border-radius:10px;background-color:#f8fbf9;background-image:radial-gradient(#dbe5df 1px,transparent 1px);background-size:20px 20px;cursor:grab;overscroll-behavior:contain}
+.graph-viewport.dragging{cursor:grabbing;user-select:none}.graph-viewport svg{display:block;max-width:none;touch-action:auto}
+.graph-viewport.compact{height:260px}
+.graph-column{font-size:12px;font-weight:650;fill:#70867e}
+.graph-edge{fill:none;stroke:#97b1a7;stroke-width:1.25;opacity:.35;pointer-events:stroke}
+.graph-edge.is-visible{stroke:#b8c6c0;stroke-dasharray:5 5;opacity:.35}
+.graph-edge.highlight{stroke:#1b806a;stroke-width:2.3;opacity:.95}
+.graph-node{cursor:pointer;outline:none}
+.graph-node:hover>rect:first-child,.graph-node:focus>rect:first-child{stroke-width:3;filter:drop-shadow(0 2px 3px #243e4122)}
+.graph-node.selected>rect:first-child{stroke:#087e79;stroke-width:3;fill:#eff9f4}
+.graph-node-kind{font-size:10px;fill:#7c8f86;letter-spacing:.03em}.graph-node-answer{font-size:12px;font-weight:700;fill:#147d64}
+.graph-node-title{font-size:12px;fill:#203b35;font-weight:550}.graph-node-sub{font-size:9px;fill:#7c8c87}
+.graph-help{font-size:10px;line-height:1.7;color:var(--muted);margin:10px 0 24px}
+.graph-detail{border:1px solid var(--line);border-radius:10px;padding:23px;overflow-wrap:anywhere;background:white}
+.graph-detail-header{align-items:flex-start}.graph-detail-header .eyebrow{font-size:9px;margin-bottom:7px}
+.graph-detail-header .header-actions{flex-wrap:wrap;justify-content:flex-end}
+.graph-answer{display:flex;flex-wrap:wrap;align-items:center;gap:15px;margin:15px 0;font-size:11px;color:var(--muted)}
+.graph-answer strong{background:#e5f3ef;padding:8px 12px;border-radius:6px;color:var(--teal);font-size:14px}
+.graph-full-text{font-size:13px;line-height:1.95;white-space:pre-wrap;margin:17px 0}
+.graph-condition{font-size:11px;color:#71837c;line-height:1.85}
+.graph-source{display:inline-block;border-bottom:1px solid #8ab7a7;font-size:12px;color:var(--teal);margin:8px 0}
+.graph-author{font-size:11px;color:var(--muted);margin:15px 0}
+.graph-link{display:block;border:0;text-align:left;padding:5px 0;background:transparent;color:#367d6a;line-height:1.7;font-size:11px;overflow-wrap:anywhere;max-width:100%}
+.graph-link:hover{text-decoration:underline}.graph-author .graph-link{display:inline}
+.graph-claims{margin-top:24px}.graph-detail h4{font-size:12px;font-weight:600;margin:0 0 12px}
+.graph-claim-row{display:flex;width:100%;gap:12px;text-align:left;border:0;border-top:1px solid var(--line);background:white;padding:14px 7px;color:var(--ink)}
+.graph-claim-row:hover{background:#f4f9f6}.graph-claim-row>span{color:#9caea6;font:10px ui-monospace,monospace;padding-top:4px}
+.graph-claim-row p{font-size:12px;line-height:1.85;margin:0 0 5px}.graph-claim-row small{font-size:10px;line-height:1.7;color:var(--muted)}
+.graph-relations{display:grid;grid-template-columns:1fr 1fr;gap:28px;border-top:1px solid var(--line);padding-top:20px;margin-top:22px}
+.graph-relation{padding:6px 0}.graph-relation-label{font-size:9px;color:#9b8c66;background:#f8f5ee;border-radius:3px;padding:2px 4px}
+.graph-relations .muted{font-size:11px;color:var(--muted)}.graph-relations summary,.graph-raw summary{font-size:11px;cursor:pointer;color:var(--muted);padding:10px 0;line-height:1.6}
+.graph-raw{border-top:1px dashed var(--line);margin-top:18px;padding-top:8px}
+@media(max-width:1100px){.graph-intro,.graph-detail-header{align-items:flex-start;flex-direction:column}.graph-zoom{margin-left:0}.graph-legend small{width:100%;margin-left:0}}
+@media(max-width:700px){#view-graph{padding:20px 14px}.graph-viewport{height:480px}.graph-detail{padding:17px}.graph-relations{grid-template-columns:1fr;gap:22px}.case-tabs{padding:0 18px}.graph-controls{gap:12px}.graph-control select{max-width:200px}}

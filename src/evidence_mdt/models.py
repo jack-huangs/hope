@@ -7,6 +7,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .prompts import RECRUIT, response_system
+
 
 @dataclass
 class ModelResult:
@@ -52,8 +54,15 @@ class MockModel(Model):
             content = {"queries": [payload["question"]["stem"] + " counter evidence",
                                    payload["question"]["stem"] + " distinguish alternatives"]}
         elif task == "recruit":
-            content = {"roles": ["diagnostic specialist", "clinical epidemiologist",
-                                 "pharmacology specialist", "general medicine specialist"]}
+            content = {"experts": [
+                {"role": "diagnostic specialist", "expertise": "Clinical diagnosis and differential assessment",
+                 "focus": "Assess the case findings and plausible clinical interpretations"},
+                {"role": "clinical epidemiologist", "expertise": "Clinical evidence and study interpretation",
+                 "focus": "Assess evidence applicability, uncertainty, and limitations"},
+                {"role": "pharmacology specialist", "expertise": "Clinical pharmacology and medication safety",
+                 "focus": "Assess relevant drug indications, contraindications, and risks"},
+                {"role": "general medicine specialist", "expertise": "Integrated clinical assessment",
+                 "focus": "Assess overall clinical context and decision-relevant risks"}]}
         elif task == "novelty":
             candidate = " ".join(payload["candidate"].lower().split())
             known = {" ".join(x.lower().split()) for x in payload["existing"]}
@@ -65,7 +74,7 @@ class MockModel(Model):
             chosen = labels[seed[0] % len(labels)]
             rest = 0.3 / (len(labels) - 1)
             probs = {k: (0.7 if k == chosen else rest) for k in labels}
-            cites = [x["chunk_id"] for x in payload.get("evidence", [])[:1]]
+            cites = [x["chunk_id"] for x in (payload.get("evidence", []) + payload.get("additional_evidence", []))[:1]]
             content = {"answer": chosen, "probabilities": probs, "citations": cites,
                        "claims": [{"text": "Fixture claim " + chosen, "answer": chosen,
                                    "citation_ids": cites, "polarity": "support", "conditions": ""}],
@@ -92,37 +101,13 @@ class OpenAICompatibleModel(Model):
         if not key:
             raise RuntimeError(f"Missing environment variable {self.api_key_env}")
         task = payload["task"]
-        if task in {"answer", "review", "host", "repair"}:
-            original = payload.get("original_request", payload) if task == "repair" else payload
-            labels = list(original["question"]["options"])
-            label_text = json.dumps(labels, ensure_ascii=False)
-            probability_shape = json.dumps({label: "number in [0,1]" for label in labels}, ensure_ascii=False)
-            visible_ids = [item["chunk_id"] for item in original.get("evidence", [])]
-            visible_ids += [item["id"] for item in original.get("messages", [])]
-            system = (
-                "Return exactly one JSON object. This is a research response, not clinical advice. "
-                f"The only valid answer and claims[].answer values are option KEYS {label_text}; "
-                "never put option text there. "
-                f"probabilities must have exactly these keys and numeric values: {probability_shape}; "
-                "every value must be between 0 and 1 and the values must sum to 1. "
-                f"citations and claims[].citation_ids may contain only visible IDs {json.dumps(visible_ids, ensure_ascii=False)}. "
-                "Return answer, probabilities, citations (array of IDs), claims (array of objects with "
-                "text, answer, citation_ids, polarity, conditions), and opinion (short string). "
-                "Each claim polarity must be support, contradict, limit, or uncertain; "
-                "conditions must be one STRING (use an empty string if none), never an array. "
-                "Put each distinct reason, limitation, and counterevidence in claims; "
-                "opinion is only a short audit summary and must contain no unique reason. "
-                "For host responses also return unexplained_contradiction and missing_distinction as booleans. "
-                "Use only the provided question, options, visible evidence, and messages. "
-                "Do not use a gold label or assume an option is correct from its key."
-            )
-            if task == "repair":
-                system += (" Correct only the structure of original_response using validation_error. "
-                           "Preserve its substantive judgment and every original numeric probability exactly. "
-                           "Map option text to its unique key if needed; never change the selected option. "
-                           "Do not add new medical reasoning or calculate a new probability vector. "
-                           "If the response cannot be faithfully repaired, return an empty JSON object. "
-                           "Return no commentary or wrapper.")
+        if task == "preparation":
+            # 准备任务自带短提示词，不改变答题团队的提示词。
+            system = payload["instruction"]
+        elif task in {"answer", "review", "host", "repair"}:
+            system = response_system(payload)
+        elif task == "recruit":
+            system = RECRUIT
         else:
             system = ("Return exactly one JSON object. For semantic return "
                       "{\"relation\": one of equivalent, complementary, contradictory, condition_different, unknown}. "
@@ -130,8 +115,7 @@ class OpenAICompatibleModel(Model):
                       "the same medical proposition, rationale, population, conditions and polarity, even "
                       "when wording or language differs. For semantic_batch return "
                       "{\"relations\":[one relation label per input pair in the same order]}. "
-                      "Uncertain pairs are unknown. For recruit return "
-                      "{\"roles\":[four distinct medical role strings]}. For novelty return "
+                      "Uncertain pairs are unknown. For novelty return "
                       "{\"relevant\":boolean,\"novel\":boolean,\"new_claim_or_condition\":boolean}; "
                       "the last flag is true only for a distinct relevant claim or condition. "
                       "For queries return {\"queries\":[zero to two strings]}. Use only supplied material.")

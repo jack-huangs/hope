@@ -124,7 +124,7 @@ def test_injection_enters_raw_messages_before_semantic_view_and_labels_hidden(tm
     q = question()
     ev = evidence()
     runner = Runner(MockModel(), Retriever(ev, MockDense()), tmp_path)
-    injection = {"receiver": 0, "speaker": 1, "wrong_option": "B", "round_id": 1,
+    injection = {"speaker": 1, "second_speaker": 2, "wrong_option": "B", "round_id": 1,
                  "text": "Repeated erroneous assertion", "repeat_message": True}
     runner.run_group(q, 1, "semantic", ev, variant="C:repeated_message",
                      message_injection=injection)
@@ -134,11 +134,14 @@ def test_injection_enters_raw_messages_before_semantic_view_and_labels_hidden(tm
     assert len(exposed) == 1
     event = exposed[0]
     assert len(event["altered_raw_messages"]) == 2
+    assert len({m["role"] for m in event["altered_raw_messages"]}) == 2
+    assert event["altered_raw_messages"][0]["claims"] == event["altered_raw_messages"][1]["claims"]
     assert len([m for m in event["displayed_messages"] if m["kind"] == "opinion"])
     duplicate = [m for m in event["displayed_messages"]
                  if m["kind"] == "claim" and m["claim"] == "Repeated erroneous assertion"]
     assert len(duplicate) == 1
     assert len(duplicate[0]["member_claim_ids"]) == 2
+    assert len({a["role"] for a in duplicate[0]["attributions"]}) == 2
     for call in calls:
         payload = json.dumps(call["request"], ensure_ascii=False)
         assert "C:repeated_message" not in payload
@@ -154,7 +157,7 @@ def test_replayed_r0_has_full_graph_and_repeats_are_independent(tmp_path):
     first, r0 = runner.run_group(q, 1, "ordinary", ev)
     runner.run_group(q, 1, "semantic", ev, r0_source=r0)
     events = records(tmp_path / "events.jsonl")
-    replay_id = "q-one:repeat-1:natural:semantic"
+    replay_id = "q-one:repeat-1:B:base:semantic"
     replay = [e for e in events if e.get("run_id") == replay_id and e.get("round_id") == 0
               and e.get("type") == "turn"]
     assert len(replay) == 4

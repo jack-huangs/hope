@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from decimal import Decimal
 import math
 import time
-from typing import Any, Iterable
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -100,19 +99,8 @@ class Budget:
         self.tokens += int(usage.get("total_tokens") or 0)
 
 
-def probability_sum_within_tolerance(values: Iterable[int | float]) -> bool:
-    """按输出数值的十进制表示判断原有 ±0.01（含边界）容差，不改概率。
-
-    调用方先检查数值类型、有限性和范围。0.99 的二进制浮点差可能
-    略大于 0.01；Decimal(str(v)) 避免该误报，也不扩大十进制容差。
-    """
-    total = sum((Decimal(str(value)) for value in values), Decimal(0))
-    return abs(total - Decimal(1)) <= Decimal("0.01")
-
-
-def validate_answer(data: dict[str, Any], options: dict[str, str], evidence_ids: set[str],
-                    message_ids: set[str]) -> dict[str, Any]:
-    """在入图前检查完整概率、合法选项和真实可见的引用。"""
+def validate_answer(data: dict[str, Any], options: dict[str, str]) -> dict[str, Any]:
+    """检查答案、概率和引用字段结构；引用 ID 不再与逐次清单匹配。"""
     labels = set(options)
     if data.get("answer") not in labels:
         raise ValueError("invalid answer label")
@@ -121,11 +109,9 @@ def validate_answer(data: dict[str, Any], options: dict[str, str], evidence_ids:
         raise ValueError("probabilities must include every option exactly once")
     if any(not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or not 0 <= v <= 1 for v in probs.values()):
         raise ValueError("invalid probability value")
-    if not probability_sum_within_tolerance(probs.values()):
-        raise ValueError("probabilities must sum to one")
     cites = data.get("citations", [])
-    if not isinstance(cites, list) or not all(isinstance(x, str) and (x in evidence_ids or x in message_ids) for x in cites):
-        raise ValueError("citation not visible")
+    if not isinstance(cites, list) or not all(isinstance(x, str) and x.strip() for x in cites):
+        raise ValueError("citations must be a list of nonempty ID strings")
     claims = data.get("claims", [])
     if not isinstance(claims, list):
         raise ValueError("claims must be a list")
@@ -135,8 +121,8 @@ def validate_answer(data: dict[str, Any], options: dict[str, str], evidence_ids:
         if claim.get("answer") not in labels:
             raise ValueError("claim answer invalid")
         claim_cites = claim.get("citation_ids", [])
-        if not isinstance(claim_cites, list) or not all(isinstance(c, str) and (c in evidence_ids or c in message_ids) for c in claim_cites):
-            raise ValueError("claim citation not visible")
+        if not isinstance(claim_cites, list) or not all(isinstance(c, str) and c.strip() for c in claim_cites):
+            raise ValueError("claim citation_ids must be a list of nonempty ID strings")
         if claim.get("polarity", "support") not in {"support", "contradict", "limit", "uncertain"}:
             raise ValueError("invalid claim polarity")
         if not isinstance(claim.get("conditions", ""), str):

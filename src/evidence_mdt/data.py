@@ -188,3 +188,10 @@ def pubmed_snapshot(query: str, max_records: int = 20) -> tuple[list[Evidence], 
                  "search_url": search_url, "fetch_url": fetch_url,
                  "raw_xml_sha256": hashlib.sha256(raw).hexdigest(),
                  "article_metadata": article_metadata, "_raw_xml": raw.decode("utf-8")}
+
+
+
+
+
+
+

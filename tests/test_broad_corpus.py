@@ -2,6 +2,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+import pytest
 
 from evidence_mdt.models import ModelResult
 
@@ -11,6 +12,40 @@ sys.path.insert(0, str(SCRIPTS))
 SPEC = importlib.util.spec_from_file_location("prepare_broad_corpus", SCRIPTS / "prepare_broad_corpus.py")
 module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(module)
+
+
+def test_plain_keyword_queries_accepted_without_boolean_requirement():
+    terms=["urinary tract infection gram-positive cocci", "acute cystitis women pyuria"]
+    assert module.validate_queries(terms)==terms
+    payload=module.model_payload({"question_id":"q","dataset":"MedXpertQA","stem":"stem"})
+    assert 'Boolean' not in payload['constraints'] and 'AND' not in payload['constraints']
+    assert module.validate_queries(['one AND two','three AND four'])==['one AND two','three AND four']
+
+
+@pytest.mark.parametrize('queries', [[],['one'],['one','two','three','four'],['','two'],[None,'two'],['x'*501,'two']])
+def test_query_structure_remains_checked(queries):
+    with pytest.raises(ValueError):module.validate_queries(queries)
+
+
+def test_three_queries_are_all_searched_and_results_deduplicated(tmp_path,monkeypatch):
+    source=fixture_source(tmp_path)
+    class ThreeQueryModel(FixtureModel):
+        def complete(self,payload):
+            self.payloads.append(payload)
+            content={'queries':['cranial nerve palsy','diplopia ptosis','ocular weakness']}
+            return ModelResult(content,{'choices':[{'message':{'content':json.dumps(content)}}]}, {'total_tokens':11},payload)
+    model=ThreeQueryModel();monkeypatch.setattr(module,'create_model',lambda backend:model)
+    searched=[]
+    def request(url,filename,timeout):
+        if 'esearch' in url:
+            searched.append(url);raw=b'{"esearchresult":{"idlist":["123","789"]}}'
+        else:raw=XML
+        filename.write_bytes(raw);return raw
+    monkeypatch.setattr(module.base,'request_once',request)
+    result=module.prepare(source,tmp_path/'three',backend='mock',max_model_calls=1,retries=0,pause=0,backoff=0)
+    assert result['status']=='complete' and len(searched)==3
+    assert len(result['records'][0]['snapshots'])==3
+    assert result['corpus_chunks']==2 # old abstract plus one unique new abstract, not three copies
 
 
 class FixtureModel:

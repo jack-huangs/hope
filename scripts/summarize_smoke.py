@@ -129,9 +129,10 @@ def make_report(run_dir: Path, preparation_manifest: Path | None = None) -> dict
     repair_calls = sum((c.get("request") or {}).get("task") == "repair" for c in calls)
     repair_checked = sum(e.get("type") == "response_repair_checked" for e in events)
     supplements = [e for e in events if e.get("type") == "supplement"]
-    natural = [r for r in results if r.get("variant", "natural") == "natural"]
-    natural_assignments = [a for a in assignments if a.get("variant", "natural") == "natural"]
-    by_dataset_group = summarize(natural, natural_assignments, failures)
+    from evidence_mdt.metrics import baseline_records
+    baseline = baseline_records(results)
+    baseline_assignments = baseline_records(assignments)
+    by_dataset_group = summarize(baseline, baseline_assignments, failures)
     calls_by_group_task = call_stats(calls, assigned_by_id)
     all_calls = list(calls_by_group_task.values())
     usage = {field: sum(row[field] for row in all_calls) for field in (
@@ -164,13 +165,13 @@ def make_report(run_dir: Path, preparation_manifest: Path | None = None) -> dict
                    "schema_failure_attempts": sum(schema_failures.values()),
                    "repair_calls": repair_calls, "repair_checked_events": repair_checked,
                    "note": "失败尝试累计保留；旧版失败若无校验事件，按失败错误计入问题次数。"},
-        "supplement": {"criteria_met_completed_runs": sum(bool(r.get("trigger", {}).get("triggered")) for r in natural),
+        "supplement": {"criteria_met_completed_runs": sum(bool(r.get("trigger", {}).get("triggered")) for r in baseline),
                        "eligible_triggered_completed_runs": sum(r.get("group") == "semantic_retrieval"
-                           and bool(r.get("trigger", {}).get("triggered")) for r in natural),
+                           and bool(r.get("trigger", {}).get("triggered")) for r in baseline),
                        "supplement_attempt_events": len(supplements),
                        "new_chunks_in_attempt_events": sum(len(e.get("chunk_ids") or []) for e in supplements),
-                       "completed_runs_with_new_chunks": sum(bool(r.get("supplemental_chunk_ids")) for r in natural)},
-        "natural_by_dataset_group": by_dataset_group,
+                       "completed_runs_with_new_chunks": sum(bool(r.get("supplemental_chunk_ids")) for r in baseline)},
+        "baseline_by_dataset_group": by_dataset_group,
         "preparation": prep, "warnings": warnings, "next_step": next_step,
     }
 
@@ -207,7 +208,7 @@ def render_markdown(report: dict[str, Any]) -> str:
                f"{supplement['completed_runs_with_new_chunks']} 组次。事件包含失败尝试。"), "",
               "| 题集 / 组别 | 分配 | 完成 | 有效概率 n | 准确率（完成） | Brier |", 
               "|---|---:|---:|---:|---:|---:|"]
-    for key, row in report["natural_by_dataset_group"].items():
+    for key, row in report["baseline_by_dataset_group"].items():
         dataset, group, _variant = key.split("/", 2)
         accuracy = row["accuracy_completed_with_gold"]
         brier = row["brier"]

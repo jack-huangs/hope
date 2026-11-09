@@ -32,9 +32,10 @@ def build_case(run_dir: Path, question_id: str, group: str, repeat_id: int,
     events = read_jsonl(run_dir / "events.jsonl", warnings)
     if warnings:
         raise ValueError("结果或事件日志缺失、损坏：" + "；".join(warnings))
-    matched = [r for r in results if str(r.get("question_id")) == question_id
+    from evidence_mdt.metrics import baseline_records
+    matched = [r for r in baseline_records(results) if str(r.get("question_id")) == question_id
                and r.get("group") == group and r.get("repeat_id") == repeat_id
-               and r.get("variant", "natural") == "natural" and r.get("status", "ok") == "ok"
+               and r.get("status", "ok") == "ok"
                and (attempt_id is None or r.get("attempt_id") == attempt_id)]
     if len(matched) != 1:
         raise ValueError(f"预期恰好一条成功结果，实际 {len(matched)} 条；可用 --attempt-id 消歧")

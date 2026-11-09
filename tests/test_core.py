@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from evidence_mdt.data import normalize_question
-from evidence_mdt.interventions import b_evidence, c_evidence
+from evidence_mdt.interventions import b_evidence, d_evidence
 from evidence_mdt.metrics import brier
 from evidence_mdt.models import MockModel
 from evidence_mdt.retrieval import MockDense, Retriever
@@ -40,21 +40,35 @@ def test_gold_and_pubmed_long_answer_hidden():
     assert bigbio.options == {"A": "one", "B": "two"}
 
 
-def test_answer_validation_rejects_missing_labels_and_invisible_citation():
+def test_answer_validation_accepts_history_ids_and_rejects_missing_labels():
     data = {"answer": "A", "probabilities": {"A": 0.7, "B": 0.3},
-            "citations": ["hidden"], "claims": [], "opinion": "test"}
-    with pytest.raises(ValueError, match="citation"):
-        validate_answer(data, {"A": "a", "B": "b"}, {"visible"}, set())
+            "citations": ["historical-claim"], "claims": [], "opinion": "test"}
+    assert validate_answer(data, {"A": "a", "B": "b"}) == data
     data["citations"] = []
     data["probabilities"] = {"A": 1.0}
     with pytest.raises(ValueError, match="every option"):
-        validate_answer(data, {"A": "a", "B": "b"}, set(), set())
+        validate_answer(data, {"A": "a", "B": "b"})
+
+
+@pytest.mark.parametrize("invalid", ["e", None, [1], [None], [""], [" "]])
+@pytest.mark.parametrize("field", ["citations", "citation_ids"])
+def test_citation_fields_require_nonempty_id_strings(field, invalid):
+    data = {"answer": "A", "probabilities": {"A": 0.7, "B": 0.3},
+            "citations": ["historical-source"],
+            "claims": [{"text": "Previous finding", "answer": "A",
+                        "citation_ids": ["historical-claim"]}], "opinion": "test"}
+    if field == "citations":
+        data[field] = invalid
+    else:
+        data["claims"][0][field] = invalid
+    with pytest.raises(ValueError, match="citation"):
+        validate_answer(data, {"A": "a", "B": "b"})
 
 
 def test_retrieval_id_fusion_and_b_duplicates():
     evidence = fixture_evidence()
     retriever = Retriever(evidence, MockDense())
-    got = retriever.search("alpha", limit=6)
+    got = retriever.search("alpha")
     assert len(got) == 2
     copied = b_evidence(got, "literal5", got[0].chunk_id)
     assert len(copied) == len(got) + 4
@@ -83,7 +97,7 @@ def test_mock_three_group_e2e_and_visibility(tmp_path):
     assert all(r["r0_reused"] for r in results[1:])
     assert not any("gold" in c["request"]["question"] for c in calls if "question" in c["request"])
     for group in GROUPS:
-        group_id = f"{q.question_id}:repeat-1:natural:{group}"
+        group_id = f"{q.question_id}:repeat-1:B:base:{group}"
         round_one = [x for x in events if x.get("type") == "turn" and x.get("run_id") == group_id
                      and x.get("round_id") == 1]
         assert len(round_one) == 4
@@ -106,12 +120,14 @@ def test_budget_stops_without_final_result(tmp_path):
     assert not (tmp_path / "results.jsonl").exists()
 
 
-def test_c_evidence_is_new_material_before_r0(tmp_path):
+def test_d_evidence_is_new_material_before_r0(tmp_path):
     q = fixture_question()
-    ev = c_evidence(fixture_evidence(), "symbolic injected text", q.question_id)
+    ev = d_evidence(fixture_evidence(), [f"symbolic injected text {i}" for i in range(5)], q.question_id)
     runner = Runner(MockModel(), Retriever(fixture_evidence(), MockDense()), tmp_path)
-    runner.run_group(q, 1, "ordinary", ev, variant="C:evidence_error")
+    runner.d_target_answer = "B"
+    runner.d_error_explanation = "synthetic error explanation"
+    runner.run_group(q, 1, "ordinary", ev, variant="D:evidence_error")
     r0 = [x for x in read_jsonl(tmp_path / "events.jsonl") if x.get("type") == "turn" and x.get("round_id") == 0]
     assert len(r0) == 4
-    assert all(len(x["visible_evidence"]) == 3 for x in r0)
+    assert all(len(x["visible_evidence"]) == 7 for x in r0)
     assert all("derived_from" not in e for x in r0 for e in x["visible_payload"]["evidence"])

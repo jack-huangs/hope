@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -148,6 +149,47 @@ def parse_xml(raw: bytes, fetched_at: str) -> tuple[list[dict], list[dict]]:
     return evidence, metadata
 
 
+def reuse_rows(output, manifest, source, *, broad=False):
+    source = Path(source).resolve()
+    raw = (source / "preparation_manifest.json").read_bytes()
+    parent = json.loads(raw)
+    if parent["status"] != "complete":
+        raise ValueError("Reuse source is incomplete")
+    old = {r["question_id"]: r for r in parent["records"]}
+    files = set()
+    for row in manifest["records"]:
+        previous = old.get(row["question_id"])
+        if not row["dataset"].lower().startswith("pubmedqa") or previous is None:
+            continue
+        if row["public_question_sha256"] != previous["public_question_sha256"]:
+            raise ValueError("Reuse public question differs")
+        if broad and row["status"] == "not_triggered":
+            if previous["status"] != "not_triggered":
+                raise ValueError("Reuse broad trigger differs")
+            continue
+        if not broad and row["queries"] != previous["queries"]:
+            raise ValueError("Reuse queries differ")
+        if previous["status"] != "ready":
+            raise ValueError("Reuse row is incomplete")
+        row.update(copy.deepcopy(previous))
+        row["reused_from"] = {"source": str(source), "manifest_sha256": sha(raw)}
+        for entry in row["snapshots"]:
+            files.update(entry[k] for k in ("snapshot_file", "evidence_file", "raw_xml_file") if entry.get(k))
+            files.update(a["raw_file"] for a in entry.get("attempts", []) if a.get("raw_file"))
+            snapshot = json.loads((source / entry["snapshot_file"]).read_bytes())
+            if snapshot.get("raw_esearch_file"):
+                files.add(snapshot["raw_esearch_file"])
+    copied = {}
+    for filename in sorted(files):
+        data = (source / filename).read_bytes()
+        destination = output / filename
+        if destination.exists() and destination.read_bytes() != data:
+            raise ValueError("Reuse filename collision")
+        destination.write_bytes(data)
+        copied[filename] = sha(data)
+    manifest["reuse_provenance"] = {"source": str(source), "manifest_sha256": sha(raw), "files_sha256": copied}
+
+
 def prepare(source: Path, output: Path, max_records: int = 8, retries: int = 2,
             pause: float = 1.0, backoff: float = 1.0, reuse_source: Path | None = None) -> dict:
     if max_records < 1 or retries < 0 or pause < 0 or backoff < 0:
@@ -187,7 +229,6 @@ def prepare(source: Path, output: Path, max_records: int = 8, retries: int = 2,
                     "question_ids": parent["question_ids"],
                     "forbidden_pubmedqa_pmids": parent["forbidden_pubmedqa_pmids"], "records": records}
         if reuse_source:
-            from reuse_query_snapshot import reuse_rows
             reuse_rows(output, manifest, reuse_source)
         save_json(path, manifest)
     forbidden = set(manifest["forbidden_pubmedqa_pmids"])

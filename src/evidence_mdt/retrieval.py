@@ -10,6 +10,9 @@ from typing import Protocol
 from .schema import Evidence
 
 
+INITIAL_EVIDENCE_LIMIT = 10
+
+
 def tokens(text: str) -> list[str]:
     return re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]", text.lower())
 
@@ -136,7 +139,7 @@ class Retriever:
             out.append(score)
         return out
 
-    def search(self, query: str, limit: int = 6, exclude: set[str] | None = None) -> list[Evidence]:
+    def search(self, query: str, limit: int = INITIAL_EVIDENCE_LIMIT, exclude: set[str] | None = None) -> list[Evidence]:
         if not self.evidence:
             self.last_trace = {"query": query, "excluded_chunk_ids": sorted(exclude or []),
                                "reason": "empty_corpus", "returned_chunk_ids": []}

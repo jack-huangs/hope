@@ -31,11 +31,11 @@ def test_nonfinite_probability_and_bad_claim_citation_rejected():
     answer = {"answer": "A", "probabilities": {"A": float("nan"), "B": 0.5},
               "citations": [], "claims": [], "opinion": "text"}
     with pytest.raises(ValueError, match="probability"):
-        validate_answer(answer, {"A": "a", "B": "b"}, set(), set())
+        validate_answer(answer, {"A": "a", "B": "b"})
     answer["probabilities"] = {"A": 0.5, "B": 0.5}
     answer["claims"] = [{"text": "assertion", "answer": "A", "citation_ids": "e"}]
     with pytest.raises(ValueError, match="claim citation"):
-        validate_answer(answer, {"A": "a", "B": "b"}, {"e"}, set())
+        validate_answer(answer, {"A": "a", "B": "b"})
 
 
 def test_provider_request_parameters_and_actual_revision(monkeypatch):

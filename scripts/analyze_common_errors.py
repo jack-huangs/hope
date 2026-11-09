@@ -1,4 +1,4 @@
-"""只读审计自然共同错误；不做医学判断或额外语义聚类。"""
+"""只读审计基线共同错误；不做医学判断或额外语义聚类。"""
 from __future__ import annotations
 
 import argparse
@@ -201,7 +201,8 @@ def make_report(run_dir: Path) -> dict[str, Any]:
     warnings: list[str] = []
     results = read_jsonl(run_dir / "results.jsonl", warnings)
     events = read_jsonl(run_dir / "events.jsonl", warnings)
-    selected = [r for r in results if r.get("status", "ok") == "ok" and r.get("variant", "natural") == "natural"]
+    from evidence_mdt.metrics import baseline_records
+    selected = baseline_records([r for r in results if r.get("status", "ok") == "ok"])
     keys = Counter((r.get("dataset"), r.get("question_id"), r.get("repeat_id"),
                     r.get("group"), r.get("variant", "natural")) for r in selected)
     if any(count > 1 for count in keys.values()):
@@ -222,7 +223,7 @@ def make_report(run_dir: Path) -> dict[str, Any]:
             "r0_correct_to_final_wrong": sum(x["correct_to_wrong"] is True
                                               for r in complete for x in r["r0_to_final"]),
         }
-    return {"scope": "success natural results, matching attempt only", "summary": summary,
+    return {"scope": "success baseline results (B:base preferred, legacy natural fallback), matching attempt only", "summary": summary,
             "cases": rows, "warnings": warnings,
             "interpretation": ["外显引用不等于完整依据；无可追溯引用时集中度为 null。",
                 "消息暴露不等于因果影响；显式引用单独列出。",
@@ -231,7 +232,7 @@ def make_report(run_dir: Path) -> dict[str, Any]:
 
 
 def render_markdown(report: dict[str, Any]) -> str:
-    lines = ["# 自然共同错误日志审计", "", "仅纳入成功的 natural 结果及其对应 attempt 的原始日志。", "",
+    lines = ["# 基线共同错误日志审计", "", "仅纳入成功的 B:base 基线及其对应 attempt；旧 natural 按同题/重复/组回退，同键优先 B:base。", "",
              "| 数据集 / 组别 | 成功结果 | 完整日志 | 共同错 | 高置信共同错 | R0 正确→最终错 |", "|---|---:|---:|---:|---:|---:|"]
     for key, row in report["summary"].items():
         lines.append(f"| {key} | {row['successful_results']} | {row['complete_logs']} | {row['common_errors']} | {row['high_confidence_common_errors']} | {row['r0_correct_to_final_wrong']}/{row['r0_correct_with_known_final']} |")

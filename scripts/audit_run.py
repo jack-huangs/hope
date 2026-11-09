@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -73,6 +74,8 @@ def audit(run_dir: Path) -> dict[str, Any]:
         turns = [e for e in run_events if e.get("type") == "turn" and e.get("run_id") == run_id]
         checked_turns += len(turns)
         roles = result.get("roles") or []
+        match = re.search(r'v(\d+)\.(\d+)', result.get('prompt_version') or '')
+        full_history = bool(match and tuple(map(int,match.groups())) >= (2,7))
         r0 = [t for t in turns if t.get("round_id") == 0]
         if len(r0) != 4 or {t.get("role") for t in r0} != set(roles) or len(set(roles)) != 4:
             issue(issues, run_id, "r0_count_or_roles")
@@ -96,25 +99,39 @@ def audit(run_dir: Path) -> dict[str, Any]:
             issue(issues, run_id, "unexpected_review")
 
         allowed_injections: dict[tuple[int, str], set[str]] = defaultdict(set)
-        for event in run_events:
+        public_injections = []
+        turn_positions = {e.get('turn_id'):i for i,e in enumerate(run_events) if e.get('type')=='turn'}
+        for index,event in enumerate(run_events):
             if event.get("type") == "injection":
-                allowed_injections[(event.get("round_id"), event.get("receiver"))].update(
-                    m.get("id") for m in event.get("altered_raw_messages", []) if m.get("id"))
+                ids={m.get('id') for m in event.get('altered_raw_messages',[]) if m.get('id')}
+                if event.get('visibility')=='public':
+                    public_injections.append((index,ids))
+                else:
+                    allowed_injections[(event.get('round_id'),event.get('receiver'))].update(ids)
         for turn in turns:
             round_id = turn.get("round_id")
             if isinstance(round_id, int) and 1 <= round_id <= 4:
-                expected = {t["turn_id"] for t in turns if t.get("round_id") == round_id - 1 or
+                expected = {t["turn_id"] for t in turns if (full_history and isinstance(t.get('round_id'),int) and t['round_id']<round_id)
+                            or (not full_history and t.get("round_id") == round_id - 1) or
                             (t.get("round_id") == round_id and isinstance(t.get("order"), int)
                              and isinstance(turn.get("order"), int) and t["order"] < turn["order"])}
                 visible = set(turn.get("visible_messages") or [])
                 injected = allowed_injections.get((round_id, turn.get("role")), set())
+                injected = set(injected)
+                for index, ids in public_injections:
+                    if index < turn_positions.get(turn.get('turn_id'),-1):
+                        injected.update(ids)
                 if not expected <= visible or not visible <= expected | injected:
                     issue(issues, run_id, f"round_{round_id}_visibility")
             try:
-                payload = turn.get("visible_payload") or {}
-                message_ids = {m["id"] for m in payload.get("messages", []) if isinstance(m, dict) and "id" in m}
-                validate_answer(turn.get("raw_response") or {}, result["options"],
-                                set(turn.get("visible_evidence") or []), message_ids)
+                validate_answer(turn.get("raw_response") or {}, result["options"])
+                if not full_history:
+                    # Historical protocols required a unit-sum vector; do not silently re-audit
+                    # old experiments under the user's newer relaxed rule.
+                    from decimal import Decimal
+                    total=sum((Decimal(str(p)) for p in turn['raw_response']['probabilities'].values()),Decimal(0))
+                    if abs(total-1)>Decimal('0.01'):
+                        raise ValueError('historical probability sum outside protocol tolerance')
             except (ValueError, KeyError, TypeError):
                 issue(issues, run_id, "invalid_turn_probability_or_citation")
         for edge in (e for e in run_events if e.get("type") == "edge" and e.get("run_id") == run_id):

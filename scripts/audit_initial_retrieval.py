@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from evidence_mdt.retrieval import MedCPTDense, MockDense, Retriever, load_corpus, tokens
+from evidence_mdt.retrieval import INITIAL_EVIDENCE_LIMIT, MedCPTDense, MockDense, Retriever, load_corpus, tokens
 
 
 def sha(data: bytes) -> str:
@@ -97,7 +97,7 @@ def audit(snapshot: Path, output: Path, backend: str = "medcpt",
               "index_manifest_sha256": sha(index_manifest.read_bytes()) if index_manifest else None,
               "query_manifest_sha256": sha(query_manifest.read_bytes()) if query_manifest else None,
               "model_revisions": index_data.get("model_revisions"),
-              "settings": {"bm25_top": 50, "dense_top": 50, "rrf_k": 60, "rerank_top": 30, "return_top": 6}}
+              "settings": {"bm25_top": 50, "dense_top": 50, "rrf_k": 60, "rerank_top": 30, "return_top": INITIAL_EVIDENCE_LIMIT}}
     fingerprint = sha(json.dumps(config, sort_keys=True, ensure_ascii=False).encode())
     config_path = output / "config.json"
     if output.exists() and not config_path.exists() and any(output.iterdir()):
@@ -128,15 +128,15 @@ def audit(snapshot: Path, output: Path, backend: str = "medcpt",
         if question["dataset"].lower().startswith("pubmedqa"):
             exclude = {e.chunk_id for e in corpus if e.document_id in {qid, f"PMID:{qid}"} or
                        (question.get("context") and e.text.strip() in question["context"])}
-        selected = retriever.search(query, limit=6, exclude=exclude)
+        selected = retriever.search(query, limit=INITIAL_EVIDENCE_LIMIT, exclude=exclude)
         trace = retriever.last_trace
         score_maps = {key: {x["chunk_id"]: x["score"] for x in trace.get(key, [])}
                       for key in ("bm25_top50", "dense_top50", "rrf_top30", "reranked")}
         stem_words = set(tokens(question["stem"]))
-        top6 = []
+        top10 = []
         for rank, item in enumerate(selected, 1):
             source_queries = provenance.get(item.chunk_id, [])
-            top6.append({"rank": rank, "evidence": asdict(item),
+            top10.append({"rank": rank, "evidence": asdict(item),
                          "scores": {key: values.get(item.chunk_id) for key, values in score_maps.items()},
                          "source_queries": source_queries,
                          "from_this_question": any(x["question_id"] == qid for x in source_queries),
@@ -149,19 +149,19 @@ def audit(snapshot: Path, output: Path, backend: str = "medcpt",
                                           "query_encoder_untruncated_tokens": query_encoder_tokens,
                                           "query_encoder_limit": 64,
                                           "reranker_query_untruncated_tokens": reranker_query_tokens},
-                        "trace": trace, "top6": top6,
-                        "citation_coverage": {"returned": len(top6),
-                            "with_url": sum(bool(x["evidence"]["source"]) for x in top6),
-                            "with_content_hash": sum(bool(x["evidence"]["content_hash"]) for x in top6),
-                            "from_this_question": sum(x["from_this_question"] for x in top6)},
-                        "review_flags": {"empty_top6": not top6,
-                            "no_same_question_source": not any(x["from_this_question"] for x in top6),
-                            "zero_stem_token_overlap": bool(top6) and all(x["stem_token_overlap"] == 0 for x in top6)}})
+                        "trace": trace, "top10": top10,
+                        "citation_coverage": {"returned": len(top10),
+                            "with_url": sum(bool(x["evidence"]["source"]) for x in top10),
+                            "with_content_hash": sum(bool(x["evidence"]["content_hash"]) for x in top10),
+                            "from_this_question": sum(x["from_this_question"] for x in top10)},
+                        "review_flags": {"empty_top10": not top10,
+                            "no_same_question_source": not any(x["from_this_question"] for x in top10),
+                            "zero_stem_token_overlap": bool(top10) and all(x["stem_token_overlap"] == 0 for x in top10)}})
     write_jsonl(output / "retrieval_trace.jsonl", records)
     summary = {"backend": backend, "fingerprint": fingerprint, "questions": len(records),
                "corpus_chunks": len(by_id),
-               "top6_count_distribution": {str(i): sum(len(r["top6"]) == i for r in records) for i in range(7)},
-               "empty_top6_ids": [r["question_id"] for r in records if r["review_flags"]["empty_top6"]],
+               "top10_count_distribution": {str(i): sum(len(r["top10"]) == i for r in records) for i in range(INITIAL_EVIDENCE_LIMIT + 1)},
+               "empty_top10_ids": [r["question_id"] for r in records if r["review_flags"]["empty_top10"]],
                "no_same_question_source_ids": [r["question_id"] for r in records
                                                 if r["review_flags"]["no_same_question_source"]],
                "zero_stem_token_overlap_ids": [r["question_id"] for r in records
@@ -174,7 +174,7 @@ def audit(snapshot: Path, output: Path, backend: str = "medcpt",
                                                 for r in records),
                "citations_with_url": sum(r["citation_coverage"]["with_url"] for r in records),
                "citations_with_hash": sum(r["citation_coverage"]["with_content_hash"] for r in records),
-               "total_citations": sum(len(r["top6"]) for r in records),
+               "total_citations": sum(len(r["top10"]) for r in records),
                "note": "Flags are gold-blind lexical/provenance checks, not medical relevance judgments."}
     save_json(output / "summary.json", summary)
     return summary

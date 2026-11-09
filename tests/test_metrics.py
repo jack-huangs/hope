@@ -4,6 +4,22 @@ from evidence_mdt.metrics import (b_target_probability_change, brier, cost_summa
                                   paired_cluster_bootstrap, summarize)
 
 
+def test_b_target_change_reports_annotated_subset_denominator():
+    records = []
+    for qid, target in (("annotated", "B"), ("background", None)):
+        base = row(question=qid, variant="B:base") | {"b_target_answer": target}
+        treated = row(question=qid, variant="B:literal3", probs={"A": .6, "B": .4}) | {
+            "b_target_answer": target, "target_option": "A"}
+        records.extend((base, treated))
+    metric = b_target_probability_change(records)["MedQA/ordinary/B:literal3"]
+    assert metric["n_intervention_trials"] == 2
+    assert metric["n_valid_pairs"] == 1
+    assert metric["n_excluded_no_target_annotation"] == 1
+    assert metric["n_missing_or_invalid"] == 0
+    assert metric["mean_delta_target_probability"] == pytest.approx(.2)
+    assert summarize(records)["MedQA/ordinary/B:literal3"]["n_completed"] == 2
+
+
 def row(question="q1", repeat=1, group="ordinary", dataset="MedQA", variant="natural",
         probs=None, answer="A", gold="A"):
     return {"dataset": dataset, "question_id": question, "repeat_id": repeat,

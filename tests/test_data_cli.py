@@ -39,7 +39,7 @@ def test_ordinary_assignment_manifest_and_resume(tmp_path):
     questions = tmp_path / "questions.jsonl"
     corpus = tmp_path / "corpus.jsonl"
     output = tmp_path / "run"
-    write_jsonl(questions, [Question("fixture", "MedQA", "alpha?", {"A": "alpha", "B": "beta"}, "A")])
+    write_jsonl(questions, [Question("fixture", "MedXpertQA", "alpha?", {"A": "alpha", "B": "beta"}, "A")])
     write_jsonl(corpus, [Evidence("c1", "doc", "alpha evidence", "local")])
     argv = ["run", "--questions", str(questions), "--corpus", str(corpus),
             "--output", str(output), "--model-backend", "mock", "--retrieval-backend", "mock",
@@ -59,7 +59,7 @@ def test_budget_failure_keeps_full_assignment_denominator(tmp_path):
     questions = tmp_path / "questions.jsonl"
     corpus = tmp_path / "corpus.jsonl"
     output = tmp_path / "run"
-    write_jsonl(questions, [Question(f"q{i}", "MedQA", "alpha?", {"A": "a", "B": "b"}, "A")
+    write_jsonl(questions, [Question(f"q{i}", "MedXpertQA", "alpha?", {"A": "a", "B": "b"}, "A")
                             for i in range(2)])
     write_jsonl(corpus, [Evidence("c1", "doc", "alpha evidence", "local")])
     with pytest.raises(RuntimeError, match="budget"):

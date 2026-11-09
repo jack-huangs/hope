@@ -19,13 +19,13 @@ def test_audit_detects_visibility_probability_and_graph_error(tmp_path):
 
     path = tmp_path / "events.jsonl"
     events = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-    ordinary = "fixture:repeat-1:natural:ordinary"
+    ordinary = "fixture:repeat-1:B:base:ordinary"
     first = next(e for e in events if e.get("type") == "turn" and e.get("run_id") == ordinary
                  and e.get("round_id") == 1 and e.get("order") == 0)
     future = next(e for e in events if e.get("type") == "turn" and e.get("run_id") == ordinary
                   and e.get("round_id") == 1 and e.get("order") == 1)
     first["visible_messages"].append(future["turn_id"])
-    first["raw_response"]["probabilities"] = {"A": 0.9, "B": 0.9}
+    first["raw_response"]["probabilities"] = {"A": 1.1, "B": 0.9}
     edge = next(e for e in events if e.get("type") == "edge" and e.get("run_id") == ordinary)
     edge["source_id"] = "missing-node"
     path.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")

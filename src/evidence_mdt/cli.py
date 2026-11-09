@@ -11,13 +11,14 @@ from .budget_resume import budget_event, reconcile_config
 from .data import (load_questions, local_text_corpus, normalize_question, prepare_pilot,
                    pubmed_snapshot, read_json_records, write_jsonl)
 from .env import load_env
-from .interventions import B_CONDITIONS, B_EXTENDED_CONDITIONS, b_evidence, c_evidence
+from .interventions import (B_CONDITIONS, B_EXTENDED_CONDITIONS, b_evidence, d_evidence,
+                            intervention_modes, validate_experiment_questions)
 from .intervention_preflight import prepare_interventions
-from .metrics import (b_target_probability_change, cost_summary, load_results,
-                      paired_cluster_bootstrap, summarize)
+from .metrics import (b_target_probability_change, d_target_probability_change, cost_summary, load_results,
+                      paired_cluster_bootstrap, summarize, baseline_records, canonical_baselines)
 from .models import create_model
 from .query_manifest import initial_queries, validate_medcpt_query_lengths
-from .retrieval import MedCPTDense, MockDense, Retriever, load_corpus
+from .retrieval import INITIAL_EVIDENCE_LIMIT, MedCPTDense, MockDense, Retriever, load_corpus
 from .runner import GROUPS, Runner, append_jsonl
 from .schema import Budget
 
@@ -53,15 +54,16 @@ def args_parser() -> argparse.ArgumentParser:
     run.add_argument("--repeats", type=int, default=1)
     run.add_argument("--max-calls", type=int, default=50000)
     run.add_argument("--max-tokens", type=int, default=10000000)
-    run.add_argument("--interventions", choices=["none", "b", "c", "both"], default="none")
+    run.add_argument("--interventions", choices=["none", "b", "c", "d"], default="none",
+                     help="none=仅B:base；b/c/d=基线加相应干预。全部传入MedXpertQA题参与，无隐式抽样")
     run.add_argument("--intervention-spec", type=Path)
     run.add_argument("--b-extended", action="store_true",
-                     help="显式增加 literal5/paraphrase5；首轮默认仅三个 B 条件")
+                     help="显式追加历史 literal5/paraphrase5 条件；默认为 base/literal11/paraphrase11")
     run.add_argument("--max-questions", type=int)
     run.add_argument("--groups", choices=["all", "ordinary"], default="all",
-                     help="ordinary 仅用于 MedQA 难度预筛；all 用于三组主比较")
+                     help="ordinary 单独运行普通组；all 运行三组主比较")
 
-    evaluate = sub.add_parser("evaluate", help="Summarize outcomes and paired Brier differences")
+    evaluate = sub.add_parser("evaluate", help="Summarize outcomes and paired raw-value metrics")
     evaluate.add_argument("--results", type=Path, required=True)
     evaluate.add_argument("--output", type=Path, required=True)
     return parser
@@ -121,7 +123,11 @@ def index_command(args) -> None:
 def run_command(args) -> None:
     load_env(args.env_file)
     questions = load_questions(args.questions)
+    validate_experiment_questions(questions)
+    enabled = intervention_modes(args.interventions)
     if args.max_questions is not None:
+        if args.max_questions <= 0:
+            raise ValueError("--max-questions must be positive")
         questions = questions[:args.max_questions]
     query_lookup = initial_queries(questions, args.query_manifest)
     corpus = load_corpus(args.corpus)
@@ -146,7 +152,7 @@ def run_command(args) -> None:
     retriever = Retriever(corpus, dense)
     runner = Runner(model, retriever, args.output, Budget(args.max_calls, args.max_tokens))
     args.output.mkdir(parents=True, exist_ok=True)
-    if args.b_extended and args.interventions not in {"b", "both"}:
+    if args.b_extended and "b" not in enabled:
         raise ValueError("--b-extended requires B interventions")
     b_conditions = B_CONDITIONS + (B_EXTENDED_CONDITIONS if args.b_extended else ())
     chosen: set[str] = set()
@@ -157,7 +163,7 @@ def run_command(args) -> None:
     intervention_manifest = None
     if args.interventions != "none":
         if not args.intervention_spec:
-            raise ValueError("B/C needs --intervention-spec with investigator-supplied text")
+            raise ValueError("B/C/D needs --intervention-spec with investigator-supplied text")
         (chosen, specs, initial_bases, initial_traces, c_injections,
          intervention_manifest) = prepare_interventions(
              questions, retriever, args.interventions, args.intervention_spec,
@@ -180,6 +186,7 @@ def run_command(args) -> None:
               "model_backend": args.model_backend, "model_name": model.name,
               "model_base_url": getattr(model, "base_url", None),
               "retrieval_backend": args.retrieval_backend, "index_manifest": str(args.index_manifest.resolve()) if args.index_manifest else None,
+              "initial_evidence_limit": INITIAL_EVIDENCE_LIMIT,
               "initial_query_strategy": "explicit_manifest" if args.query_manifest else "stem_plus_context",
               "query_manifest_sha256": (hashlib.sha256(args.query_manifest.read_bytes()).hexdigest()
                                         if args.query_manifest else None),
@@ -187,8 +194,9 @@ def run_command(args) -> None:
                                         if args.index_manifest else None),
               "repeats": args.repeats, "groups": args.groups,
               "interventions": args.interventions, "max_questions": args.max_questions,
-              "b_conditions": list(b_conditions) if args.interventions in {"b", "both"} else [],
-              "intervention_selection_seed": 20261008 if args.interventions != "none" else None,
+              "b_conditions": list(b_conditions) if "b" in enabled else [],
+              "d_evidence_count": intervention_manifest["d_evidence_count"] if "d" in enabled else 0,
+              "intervention_selection": "all_supplied_medxpertqa_questions_no_sampling",
               "intervention_manifest_sha256": (hashlib.sha256(intervention_manifest_bytes).hexdigest()
                                                 if intervention_manifest_bytes else None),
               "intervention_spec_sha256": (hashlib.sha256(args.intervention_spec.read_bytes()).hexdigest()
@@ -240,12 +248,14 @@ def run_command(args) -> None:
     assignments = []
     for q in questions:
         for repeat_id in range(1, args.repeats + 1):
-            variants = ["natural"]
+            variants = ["B:base"]
             if q.question_id in chosen:
-                if args.interventions in {"b", "both"}:
-                    variants += ["B:" + condition for condition in b_conditions]
-                if args.interventions in {"c", "both"}:
-                    variants += ["C:evidence_error", "C:message_error", "C:repeated_message"]
+                if "b" in enabled:
+                    variants += ["B:" + condition for condition in b_conditions if condition != "base"]
+                if "c" in enabled:
+                    variants += ["C:message_error", "C:repeated_message"]
+                if "d" in enabled:
+                    variants += ["D:evidence_error"]
             for variant in variants:
                 for group in groups:
                     assignments.append({"run_id": f"{q.question_id}:repeat-{repeat_id}:{variant}:{group}",
@@ -259,8 +269,16 @@ def run_command(args) -> None:
 
     def do_variant(q, repeat_id, variant, evidence, injection=None, reuse_r0=None):
         first_r0 = reuse_r0
-        runner.b_target_answer = (specs.get(q.question_id, {}).get("target_answer") or
-                                  specs.get(q.question_id, {}).get("target_option")) if variant.startswith("B:") else None
+        runner.b_target_answer = specs.get(q.question_id, {}).get(
+            "target_answer", specs.get(q.question_id, {}).get("target_option")) if variant.startswith("B:") else None
+        runner.d_target_answer = (specs.get(q.question_id, {}).get("d_wrong_option")
+                                  if variant in {"B:base", "D:evidence_error"} and "d" in enabled else None)
+        runner.d_evidence_audit = (next(item["passages"] for item in intervention_manifest["d_assignments"]
+                                       if item["question_id"] == q.question_id)
+                                   if variant == "D:evidence_error" else [])
+        runner.d_error_explanation = ("\n".join(f"{row['angle']}: {row['error_explanation']}"
+                                               for row in runner.d_evidence_audit if row["error_explanation"])
+                                      if variant == "D:evidence_error" else None)
         for group in groups:
             run_id = f"{q.question_id}:repeat-{repeat_id}:{variant}:{group}"
             if run_id in completed:
@@ -295,30 +313,33 @@ def run_command(args) -> None:
                 base = initial_bases[q.question_id]
                 trace = initial_traces[q.question_id]
             else:
-                base = retriever.search(query_lookup[q.question_id], limit=6, exclude=excluded)
+                base = retriever.search(query_lookup[q.question_id], limit=INITIAL_EVIDENCE_LIMIT, exclude=excluded)
                 trace = retriever.last_trace
             append_jsonl(args.output / "retrieval_snapshots.jsonl",
                          {"question_id": q.question_id, "dataset": q.dataset,
                           "fingerprint": fingerprint, "trace": trace})
             # 空快照仍可运行；专家会看到无证据的事实并自行给出不确定概率。
             for repeat_id in range(1, args.repeats + 1):
-                natural_r0 = do_variant(q, repeat_id, "natural", base)
+                baseline_r0 = do_variant(q, repeat_id, "B:base", base)
                 if q.question_id not in chosen:
                     continue
                 spec = specs.get(q.question_id)
                 if not spec:
                     raise ValueError(f"Missing intervention specification for {q.question_id}")
-                if args.interventions in {"b", "both"}:
+                if "b" in enabled:
                     for condition in b_conditions:
+                        if condition == "base":
+                            continue
                         exposed = b_evidence(base, condition, spec["b_target_id"],
                                              spec.get("b_paraphrases"))
                         do_variant(q, repeat_id, "B:" + condition, exposed)
-                if args.interventions in {"c", "both"}:
-                    perturbed = c_evidence(base, spec["c_evidence_text"], q.question_id)
-                    do_variant(q, repeat_id, "C:evidence_error", perturbed)
+                if "c" in enabled:
                     for name, repeated in (("message_error", False), ("repeated_message", True)):
                         injection = c_injections[(q.question_id, repeat_id, name)]
-                        do_variant(q, repeat_id, "C:" + name, base, injection, natural_r0)
+                        do_variant(q, repeat_id, "C:" + name, base, injection, baseline_r0)
+                if "d" in enabled:
+                    perturbed = d_evidence(base, [row["text"] for row in spec["d_evidence_passages"]], q.question_id)
+                    do_variant(q, repeat_id, "D:evidence_error", perturbed)
     except Exception:
         raise
     print(runner.result_log)
@@ -333,20 +354,29 @@ def evaluate_command(args) -> None:
     failures = read_json_records(failure_path) if failure_path.exists() else []
     call_path = args.results.parent / "calls.jsonl"
     calls = read_json_records(call_path) if call_path.exists() else []
-    natural = [r for r in records if r.get("variant") == "natural"]
+    # 报告副本统一基线标签；原始历史结果不修改。
+    target_probability_change = b_target_probability_change(records)
+    d_probability_change = d_target_probability_change(records)
+    records = canonical_baselines(records)
+    assignments = canonical_baselines(assignments) if assignments is not None else None
+    failures = canonical_baselines(failures)
+    baseline = baseline_records(records)
     config_path = args.results.parent / "config.json"
     run_config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
     mode = run_config.get("model_backend", "unknown")
     report = {"note": ("Mock records are software fixtures, not medical results." if mode == "mock" else
                        "Exploratory research results; not clinical validation or medical advice."),
               "model_backend": mode,
-              "natural": summarize(natural, [a for a in assignments if a["variant"] == "natural"] if assignments else None, failures),
+              "baseline": summarize(baseline, baseline_records(assignments) if assignments is not None else None, failures),
+              "baseline_selection": "B:base preferred; legacy natural is a fallback per dataset/question/repeat/group. No baseline is counted twice.",
               "all_variants": summarize(records, assignments, failures),
-              "b_target_probability_change": b_target_probability_change(records),
+              "b_target_probability_change": target_probability_change,
+              "d_target_probability_change": d_probability_change,
+              "probability_note": "Raw per-option values are preserved without sum-to-one checking or normalization. Brier retains its historical field name for the squared-error formula; these are not guaranteed normalized distributions or evidence of calibration.",
               "cost_by_run": cost_summary(calls), "paired": {}}
     for other in ("semantic", "semantic_retrieval"):
         try:
-            report["paired"][other] = paired_cluster_bootstrap(natural, "ordinary", other)
+            report["paired"][other] = paired_cluster_bootstrap(baseline, "ordinary", other)
         except ValueError as exc:
             report["paired"][other] = {"unavailable_reason": str(exc)}
     args.output.parent.mkdir(parents=True, exist_ok=True)
